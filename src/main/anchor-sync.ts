@@ -4,6 +4,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import type {
   AnchorConfig,
+  ConfigItem,
   FileReplaceItem,
   EnvVarItem,
   SyncResult
@@ -33,9 +34,13 @@ function resolveJsonPath(obj: unknown, path: string): unknown {
   return current
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function extractEnvValue(content: string, name: string): string | undefined {
   // Match: export NAME=VALUE or export NAME="VALUE" (not commented)
-  const pattern = new RegExp(`^export\\s+${name}=(.*)$`, 'm')
+  const pattern = new RegExp(`^export\\s+${escapeRegExp(name)}=(.*)$`, 'm')
   const match = content.match(pattern)
   if (!match) return undefined
 
@@ -102,7 +107,12 @@ function isValidAnchorForItem(item: FileReplaceItem | EnvVarItem): boolean {
 
 // ── Sync logic ──────────────────────────────────────────────────
 
-async function syncItem(item: FileReplaceItem | EnvVarItem): Promise<SyncResult> {
+/** Internal result that carries disk content to avoid double reads */
+interface SyncItemResult extends SyncResult {
+  diskContent?: string
+}
+
+async function syncItem(item: FileReplaceItem | EnvVarItem): Promise<SyncItemResult> {
   // No anchor → nothing to check
   if (!item.anchor) {
     return { itemId: item.id, synced: false, reason: 'no-change' }
@@ -165,7 +175,7 @@ async function syncItem(item: FileReplaceItem | EnvVarItem): Promise<SyncResult>
       return { itemId: item.id, synced: false, reason: 'no-change' }
     }
     // Content differs — caller should update stored content
-    return { itemId: item.id, synced: true }
+    return { itemId: item.id, synced: true, diskContent }
   }
 
   // item.type === 'env-var' (only remaining option)
@@ -174,7 +184,7 @@ async function syncItem(item: FileReplaceItem | EnvVarItem): Promise<SyncResult>
     return { itemId: item.id, synced: false, reason: 'no-change' }
   }
   // Value differs — caller should update stored value
-  return { itemId: item.id, synced: true }
+  return { itemId: item.id, synced: true, diskContent }
 }
 
 /**
@@ -184,30 +194,30 @@ async function syncItem(item: FileReplaceItem | EnvVarItem): Promise<SyncResult>
 export async function syncProfile(profileId: string): Promise<SyncResult[]> {
   const profile = getProfile(profileId)
   if (!profile) {
-    return []
+    throw new Error('Profile not found')
   }
+
+  // Deep-clone items to avoid mutating the store in-place (ISSUE-3)
+  const clonedItems: ConfigItem[] = JSON.parse(JSON.stringify(profile.items))
 
   const results: SyncResult[] = []
   let anyUpdated = false
 
-  for (const item of profile.items) {
+  for (const item of clonedItems) {
     // Only file-replace and env-var items can have anchors
     if (item.type !== 'file-replace' && item.type !== 'env-var') {
       continue
     }
 
     const result = await syncItem(item)
-    results.push(result)
+    // Strip internal diskContent before exposing as SyncResult
+    const { diskContent, ...syncResult } = result
+    results.push(syncResult)
 
-    if (result.synced) {
+    if (result.synced && diskContent !== undefined) {
       anyUpdated = true
 
-      // Update the stored item with disk content
-      const filePath = resolvePath(
-        item.type === 'file-replace' ? item.targetPath : item.shellFile
-      )
-      const diskContent = await readFile(filePath, 'utf-8')
-
+      // Use disk content returned by syncItem — no second read (ISSUE-2)
       if (item.type === 'file-replace') {
         item.content = diskContent
       } else if (item.type === 'env-var') {
@@ -219,9 +229,9 @@ export async function syncProfile(profileId: string): Promise<SyncResult[]> {
     }
   }
 
-  // Persist updated profile if anything changed
+  // Persist atomically with cloned items (ISSUE-3)
   if (anyUpdated) {
-    updateProfile(profile)
+    updateProfile({ ...profile, items: clonedItems })
   }
 
   return results

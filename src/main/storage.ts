@@ -1,13 +1,17 @@
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
-import type { AppState, Profile, ConfigItem, CreateProfileReq } from '../shared/types'
+import type { AppState, Profile, ConfigItem, CreateProfileReq, SyncSettings } from '../shared/types'
 import { getPresetById } from './presets'
 
 const store = new Store<AppState>({
   name: 'xoay-config',
   defaults: {
     profiles: [],
-    activeProfileId: null
+    activeProfileId: null,
+    syncSettings: {
+      enabled: false,
+      intervalMs: 300000
+    }
   }
 })
 
@@ -87,6 +91,17 @@ export function getActiveProfileId(): string | null {
 
 export function setActiveProfileId(id: string | null): void {
   store.set('activeProfileId', id)
+}
+
+// ── Sync Settings ───────────────────────────────────────────────
+
+export function getSyncSettings(): SyncSettings {
+  return store.get('syncSettings')
+}
+
+export function setSyncSettings(settings: SyncSettings): SyncSettings {
+  store.set('syncSettings', settings)
+  return store.get('syncSettings')
 }
 
 // ── Backups ──────────────────────────────────────────────────────

@@ -92,36 +92,6 @@ export async function importCurrentConfig(presetId?: string): Promise<ConfigItem
     }
   }
 
-  // Scan for additional ANTHROPIC_* and OPENAI_* env vars not covered by presets
-  const zshrcPath = expandHome('~/.zshrc')
-  if (!shellCache.has(zshrcPath)) {
-    shellCache.set(zshrcPath, await safeReadFile(zshrcPath))
-  }
-  const zshrcContent = shellCache.get(zshrcPath)
-  if (zshrcContent) {
-    const envPattern = /^export\s+(ANTHROPIC_\w+|OPENAI_\w+)=["']?(.+?)["']?\s*$/gm
-    let match: RegExpExecArray | null
-    const alreadyImported = new Set(
-      items.filter((i) => i.type === 'env-var').map((i) => (i as EnvVarItem).name)
-    )
-
-    while ((match = envPattern.exec(zshrcContent)) !== null) {
-      const [, varName, varValue] = match
-      if (alreadyImported.has(varName)) continue
-
-      items.push({
-        id: randomUUID(),
-        type: 'env-var',
-        label: varName,
-        enabled: true,
-        name: varName,
-        value: varValue,
-        shellFile: '~/.zshrc'
-      })
-      alreadyImported.add(varName)
-    }
-  }
-
   return items
 }
 

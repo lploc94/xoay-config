@@ -29,6 +29,10 @@ Electron apps run three processes:
 │  │ presets  │ │  tray   │ │ import-service│  │
 │  │ .ts      │ │ .ts     │ │ .ts           │  │
 │  └─────────┘ └─────────┘ └───────────────┘  │
+│  ┌───────────────┐                           │
+│  │ anchor-sync   │                           │
+│  │ .ts           │                           │
+│  └───────────────┘                           │
 └──────────────────┬───────────────────────────┘
                    │ IPC (ipcMain.handle / ipcRenderer.invoke)
 ┌──────────────────┴───────────────────────────┐
@@ -59,6 +63,7 @@ The main process has full Node.js and system access. It manages:
 - **Switch engine** (`switch-engine.ts`) — Executes config switches: file replacements, env var updates, shell commands. Manages backup and rollback.
 - **Presets** (`presets.ts`) — Defines built-in preset templates.
 - **Import service** (`import-service.ts`) — Reads current config files from disk to create a profile from existing settings.
+- **Anchor sync** (`anchor-sync.ts`) — Syncs stored profile items with disk content using anchors. Provides manual sync (`syncProfile`) and periodic background sync for the active profile.
 - **System tray** (`tray.ts`) — macOS menu bar tray icon with quick profile switching.
 
 ### Preload Process (`src/preload/`)
@@ -117,8 +122,14 @@ Application state is stored by `electron-store` with this schema:
 
 ```ts
 interface AppState {
-  profiles: Profile[]        // All user profiles
-  activeProfileId: string | null  // Currently active profile ID
+  profiles: Profile[]              // All user profiles
+  activeProfileId: string | null   // Currently active profile ID
+  syncSettings: SyncSettings       // Periodic sync configuration
+}
+
+interface SyncSettings {
+  enabled: boolean    // Whether periodic sync is active (default: false)
+  intervalMs: number  // Sync interval in ms (default: 300000 = 5 min)
 }
 ```
 

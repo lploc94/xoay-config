@@ -11,8 +11,9 @@ Replaces the entire contents of a target file with the specified content.
 ```ts
 interface FileReplaceItem extends BaseConfigItem {
   type: 'file-replace'
-  targetPath: string  // Absolute path or ~ for home (e.g., "~/.claude/settings.json")
-  content: string     // Full file content to write
+  targetPath: string      // Absolute path or ~ for home (e.g., "~/.claude/settings.json")
+  content: string         // Full file content to write
+  anchor?: AnchorConfig   // Optional anchor (json-path or line-content)
 }
 ```
 
@@ -27,9 +28,10 @@ Sets an environment variable in a shell config file (e.g., `~/.zshrc`).
 ```ts
 interface EnvVarItem extends BaseConfigItem {
   type: 'env-var'
-  name: string       // Variable name (e.g., "ANTHROPIC_BASE_URL")
-  value: string      // Variable value
-  shellFile: string  // Shell config file path (e.g., "~/.zshrc")
+  name: string             // Variable name (e.g., "ANTHROPIC_BASE_URL")
+  value: string            // Variable value
+  shellFile: string        // Shell config file path (e.g., "~/.zshrc")
+  anchor?: AnchorConfig    // Optional anchor (env-value only)
 }
 ```
 
@@ -83,6 +85,93 @@ if (item.type === 'file-replace') {
   // item is EnvVarItem — has name, value, shellFile
 } else if (item.type === 'run-command') {
   // item is RunCommandItem — has command, workingDir, timeout
+}
+```
+
+## Anchors
+
+An anchor is an optional marker on a `file-replace` or `env-var` item that identifies which account owns the current disk content. When sync runs, it checks the anchor first — if the anchor value doesn't match, the item is skipped (the file belongs to a different account).
+
+### Anchor Types
+
+There are three anchor types. Which types are allowed depends on the config item type:
+
+| Anchor type | Allowed on | Description |
+|-------------|-----------|-------------|
+| `json-path` | `file-replace` only | Match a value at a dot-notation path in a JSON file |
+| `line-content` | `file-replace` only | Match the exact content of a specific line number |
+| `env-value` | `env-var` only | Match the current value of an env var in the shell file |
+
+#### `json-path`
+
+Reads the target file as JSON and checks whether the value at `path` (dot notation) equals `value`.
+
+```ts
+interface JsonPathAnchor {
+  type: 'json-path'
+  path: string   // Dot-notation path (e.g., "tokens.account_id")
+  value: string  // Expected value
+}
+```
+
+**Example:** For `~/.codex/auth.json` containing `{ "tokens": { "account_id": "acct_123" } }`, an anchor with `path: "tokens.account_id"` and `value: "acct_123"` would match.
+
+#### `line-content`
+
+Checks whether a specific line (1-based) in the target file exactly equals `value`.
+
+```ts
+interface LineContentAnchor {
+  type: 'line-content'
+  line: number   // 1-based line number
+  value: string  // Expected line content
+}
+```
+
+#### `env-value`
+
+Checks whether the env var's current value in the shell file matches `value`. Only valid on `env-var` items.
+
+```ts
+interface EnvValueAnchor {
+  type: 'env-value'
+  name: string   // Env var name (e.g., "ANTHROPIC_AUTH_TOKEN")
+  value: string  // Expected value
+}
+```
+
+### Type Constraints
+
+The anchor type must be compatible with the config item type:
+
+- **`file-replace`** items accept: `json-path` or `line-content`
+- **`env-var`** items accept: `env-value` only
+- **`run-command`** items: anchors are not supported
+
+Invalid combinations are rejected by the sync service.
+
+### Union Type
+
+```ts
+type AnchorConfig = JsonPathAnchor | EnvValueAnchor | LineContentAnchor
+```
+
+The `anchor` field is optional on `FileReplaceItem` and `EnvVarItem`:
+
+```ts
+interface FileReplaceItem extends BaseConfigItem {
+  type: 'file-replace'
+  targetPath: string
+  content: string
+  anchor?: AnchorConfig  // json-path or line-content only
+}
+
+interface EnvVarItem extends BaseConfigItem {
+  type: 'env-var'
+  name: string
+  value: string
+  shellFile: string
+  anchor?: AnchorConfig  // env-value only
 }
 ```
 

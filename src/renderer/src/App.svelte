@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import type { Profile, ConfigItem, Preset, SwitchResult } from '../../shared/types'
+  import type { Profile, ConfigItem, Preset, SwitchResult, SyncResult, SyncSettings } from '../../shared/types'
   import * as ipc from './lib/ipc'
   import Sidebar from './lib/Sidebar.svelte'
   import ProfileDetail from './lib/ProfileDetail.svelte'
   import ConfigItemForm from './lib/ConfigItemForm.svelte'
   import CreateProfileDialog from './lib/CreateProfileDialog.svelte'
   import SwitchResultDialog from './lib/SwitchResultDialog.svelte'
+  import SyncSettingsDialog from './lib/SyncSettingsDialog.svelte'
 
 
   // ── State ──────────────────────────────────────────────────────
@@ -23,20 +24,24 @@
   let switchResult = $state<SwitchResult | null>(null)
   let switchProfileName = $state('')
   let loading = $state(false)
+  let showSyncSettings = $state(false)
+  let syncSettings = $state<SyncSettings>({ enabled: false, intervalMs: 300000 })
 
   const selectedProfile = $derived(profiles.find((p) => p.id === selectedProfileId) ?? null)
 
   // ── Data Loading ───────────────────────────────────────────────
   async function loadData(): Promise<void> {
     try {
-      const [p, a, pr] = await Promise.all([
+      const [p, a, pr, ss] = await Promise.all([
         ipc.listProfiles(),
         ipc.getActiveProfileId(),
-        ipc.listPresets()
+        ipc.listPresets(),
+        ipc.getSyncSettings()
       ])
       profiles = p
       activeProfileId = a
       presets = pr
+      syncSettings = ss
 
       // Select first profile if none selected
       if (!selectedProfileId && profiles.length > 0) {
@@ -128,6 +133,29 @@
     try {
       await ipc.updateProfile({ ...selectedProfile, name })
       await loadData()
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  // ── Sync Actions ──────────────────────────────────────────────
+  async function handleSyncProfile(): Promise<SyncResult[]> {
+    if (!selectedProfile) return []
+    try {
+      const { results } = await ipc.syncProfile(selectedProfile.id)
+      return results
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+      return []
+    } finally {
+      await loadData()
+    }
+  }
+
+  async function handleSaveSyncSettings(settings: SyncSettings): Promise<void> {
+    try {
+      syncSettings = await ipc.setSyncSettings(settings)
+      showSyncSettings = false
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     }
@@ -265,6 +293,8 @@
           onToggleItem={handleToggleItem}
           onImportCurrent={handleImportIntoProfile}
           onRenameProfile={handleRenameProfile}
+          onSync={handleSyncProfile}
+          onSyncSettings={() => showSyncSettings = true}
         />
       {:else}
         <div class="flex items-center justify-center h-full">
@@ -299,4 +329,11 @@
   result={switchResult}
   profileName={switchProfileName}
   onClose={() => switchResult = null}
+/>
+
+<SyncSettingsDialog
+  open={showSyncSettings}
+  settings={syncSettings}
+  onSave={handleSaveSyncSettings}
+  onCancel={() => showSyncSettings = false}
 />

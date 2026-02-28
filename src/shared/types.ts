@@ -1,3 +1,25 @@
+// ── Anchor Types ─────────────────────────────────────────────────
+
+export interface JsonPathAnchor {
+  type: 'json-path'
+  path: string
+  value: string
+}
+
+export interface EnvValueAnchor {
+  type: 'env-value'
+  name: string
+  value: string
+}
+
+export interface LineContentAnchor {
+  type: 'line-content'
+  line: number
+  value: string
+}
+
+export type AnchorConfig = JsonPathAnchor | EnvValueAnchor | LineContentAnchor
+
 // ── Config Item Types ─────────────────────────────────────────────
 
 export interface BaseConfigItem {
@@ -10,6 +32,7 @@ export interface FileReplaceItem extends BaseConfigItem {
   type: 'file-replace'
   targetPath: string
   content: string
+  anchor?: AnchorConfig
 }
 
 export interface EnvVarItem extends BaseConfigItem {
@@ -17,6 +40,7 @@ export interface EnvVarItem extends BaseConfigItem {
   name: string
   value: string
   shellFile: string
+  anchor?: AnchorConfig
 }
 
 export interface RunCommandItem extends BaseConfigItem {
@@ -67,11 +91,26 @@ export interface SwitchResult {
   success: boolean
 }
 
+// ── Sync Types ──────────────────────────────────────────────────
+
+export interface SyncResult {
+  itemId: string
+  synced: boolean
+  reason?: 'anchor-mismatch' | 'no-change' | 'file-not-found' | 'error'
+  error?: string
+}
+
+export interface SyncSettings {
+  enabled: boolean
+  intervalMs: number
+}
+
 // ── App State (electron-store schema) ────────────────────────────
 
 export interface AppState {
   profiles: Profile[]
   activeProfileId: string | null
+  syncSettings: SyncSettings
 }
 
 // ── IPC Contract ─────────────────────────────────────────────────
@@ -100,5 +139,8 @@ export const IPC_CHANNELS = {
   CONFIG_SWITCH: 'config:switch',
   CONFIG_IMPORT_CURRENT: 'config:import-current',
   IMPORT_AUTO_DETECT: 'import:auto-detect',
-  IMPORT_PREVIEW: 'import:preview'
+  IMPORT_PREVIEW: 'import:preview',
+  SYNC_PROFILE: 'sync:profile',
+  SYNC_GET_SETTINGS: 'sync:get-settings',
+  SYNC_SET_SETTINGS: 'sync:set-settings'
 } as const

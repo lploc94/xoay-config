@@ -52,6 +52,9 @@ const IPC_CHANNELS = {
   CONFIG_IMPORT_CURRENT: 'config:import-current',
   IMPORT_AUTO_DETECT:  'import:auto-detect',
   IMPORT_PREVIEW:      'import:preview',
+  SYNC_PROFILE:        'sync:profile',
+  SYNC_GET_SETTINGS:   'sync:get-settings',
+  SYNC_SET_SETTINGS:   'sync:set-settings',
 }
 ```
 
@@ -170,7 +173,7 @@ Import the current config from disk and create a new profile.
 - **Request:** `{ name: string, presetId?: string }`
 - **Response:** `IpcResponse<Profile>`
 - **Handler:** `src/main/ipc.ts`
-- **Notes:** Reads actual files from disk based on the preset's target paths. If no `presetId` is given, auto-detects which presets are relevant. Also scans `~/.zshrc` for additional `ANTHROPIC_*` and `OPENAI_*` env vars. Returns an error if no config files are found.
+- **Notes:** Reads actual files from disk based on the preset's target paths. If no `presetId` is given, auto-detects which presets are relevant. Returns an error if no config files are found.
 
 ### `import:auto-detect`
 
@@ -189,6 +192,48 @@ Preview what config items would be imported from disk.
 - **Response:** `IpcResponse<ConfigItem[]>`
 - **Handler:** `src/main/ipc.ts`
 - **Notes:** Same logic as `config:import-current` but returns items without creating a profile.
+
+---
+
+### `sync:profile`
+
+Manually sync a profile's anchored items with disk content. Reads files from disk and updates stored item values when the anchor matches and content has changed.
+
+- **Request:** `{ profileId: string }`
+- **Response:** `IpcResponse<{ results: SyncResult[] }>`
+  ```ts
+  interface SyncResult {
+    itemId: string
+    synced: boolean
+    reason?: 'anchor-mismatch' | 'no-change' | 'file-not-found' | 'error'
+    error?: string
+  }
+  ```
+- **Handler:** `src/main/ipc.ts` → delegates to `anchor-sync.ts`
+- **Notes:** Only processes `file-replace` and `env-var` items that have an `anchor` configured. Items without anchors are skipped. When `synced: true`, the stored content/value has been updated from disk. When `synced: false`, `reason` explains why (anchor didn't match, file unchanged, etc.).
+
+### `sync:get-settings`
+
+Get the current sync settings.
+
+- **Request:** no arguments
+- **Response:** `IpcResponse<SyncSettings>`
+  ```ts
+  interface SyncSettings {
+    enabled: boolean    // Whether periodic sync is active
+    intervalMs: number  // Sync interval in milliseconds (default: 300000 = 5 min)
+  }
+  ```
+- **Handler:** `src/main/ipc.ts` → delegates to `storage.ts`
+
+### `sync:set-settings`
+
+Update sync settings. Automatically starts/stops/restarts the periodic sync timer based on the change.
+
+- **Request:** `SyncSettings`
+- **Response:** `IpcResponse<SyncSettings>`
+- **Handler:** `src/main/ipc.ts` → delegates to `storage.ts` + `anchor-sync.ts`
+- **Notes:** When `enabled` transitions from `false` → `true`, starts periodic sync. When `true` → `false`, stops it. When `intervalMs` changes while enabled, restarts the timer. Periodic sync only syncs the **active** profile.
 
 ---
 

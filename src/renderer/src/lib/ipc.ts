@@ -4,6 +4,8 @@ import type {
   ConfigItem,
   Preset,
   SwitchResult,
+  SyncResult,
+  SyncSettings,
   IpcResponse
 } from '../../../shared/types'
 import { IPC_CHANNELS } from '../../../shared/types'
@@ -44,6 +46,14 @@ export const importCurrentConfig = (name: string, presetId?: string) =>
 export const autoDetectPresets = () => invoke<string[]>(IPC_CHANNELS.IMPORT_AUTO_DETECT)
 export const importPreview = (presetId?: string) =>
   invoke<ConfigItem[]>(IPC_CHANNELS.IMPORT_PREVIEW, { presetId })
+
+// ── Sync ────────────────────────────────────────────────────
+export const syncProfile = (profileId: string) =>
+  invoke<{ results: SyncResult[] }>(IPC_CHANNELS.SYNC_PROFILE, { profileId })
+export const getSyncSettings = () =>
+  invoke<SyncSettings>(IPC_CHANNELS.SYNC_GET_SETTINGS)
+export const setSyncSettings = (settings: SyncSettings) =>
+  invoke<SyncSettings>(IPC_CHANNELS.SYNC_SET_SETTINGS, settings)
 
 // ── Events from main ────────────────────────────────────────
 export function onProfileSwitched(callback: (result: SwitchResult) => void): () => void {
