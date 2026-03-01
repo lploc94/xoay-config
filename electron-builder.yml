@@ -39,6 +39,7 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
+afterSign: build/afterSign.cjs
 publish:
   provider: generic
   url: https://example.com/auto-updates
