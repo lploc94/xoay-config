@@ -9,7 +9,7 @@ import type {
   EnvVarItem,
   SyncResult
 } from '../shared/types'
-import { getProfile, getActiveProfileId, updateProfile } from './storage'
+import { getProfile, updateProfile } from './storage'
 
 // ── Path helpers ────────────────────────────────────────────────
 
@@ -235,25 +235,4 @@ export async function syncProfile(profileId: string): Promise<SyncResult[]> {
   }
 
   return results
-}
-
-// ── Periodic sync ───────────────────────────────────────────────
-
-let syncTimer: ReturnType<typeof setInterval> | null = null
-
-export function startPeriodicSync(intervalMs: number): void {
-  stopPeriodicSync()
-  syncTimer = setInterval(async () => {
-    const activeId = getActiveProfileId()
-    if (activeId) {
-      await syncProfile(activeId)
-    }
-  }, intervalMs)
-}
-
-export function stopPeriodicSync(): void {
-  if (syncTimer !== null) {
-    clearInterval(syncTimer)
-    syncTimer = null
-  }
 }

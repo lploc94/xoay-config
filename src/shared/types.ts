@@ -100,17 +100,11 @@ export interface SyncResult {
   error?: string
 }
 
-export interface SyncSettings {
-  enabled: boolean
-  intervalMs: number
-}
-
 // ── App State (electron-store schema) ────────────────────────────
 
 export interface AppState {
   profiles: Profile[]
   activeProfileId: string | null
-  syncSettings: SyncSettings
 }
 
 // ── IPC Contract ─────────────────────────────────────────────────
@@ -140,7 +134,5 @@ export const IPC_CHANNELS = {
   CONFIG_IMPORT_CURRENT: 'config:import-current',
   IMPORT_AUTO_DETECT: 'import:auto-detect',
   IMPORT_PREVIEW: 'import:preview',
-  SYNC_PROFILE: 'sync:profile',
-  SYNC_GET_SETTINGS: 'sync:get-settings',
-  SYNC_SET_SETTINGS: 'sync:set-settings'
+  SYNC_PROFILE: 'sync:profile'
 } as const

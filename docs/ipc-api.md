@@ -53,8 +53,6 @@ const IPC_CHANNELS = {
   IMPORT_AUTO_DETECT:  'import:auto-detect',
   IMPORT_PREVIEW:      'import:preview',
   SYNC_PROFILE:        'sync:profile',
-  SYNC_GET_SETTINGS:   'sync:get-settings',
-  SYNC_SET_SETTINGS:   'sync:set-settings',
 }
 ```
 
@@ -211,29 +209,6 @@ Manually sync a profile's anchored items with disk content. Reads files from dis
   ```
 - **Handler:** `src/main/ipc.ts` → delegates to `anchor-sync.ts`
 - **Notes:** Only processes `file-replace` and `env-var` items that have an `anchor` configured. Items without anchors are skipped. When `synced: true`, the stored content/value has been updated from disk. When `synced: false`, `reason` explains why (anchor didn't match, file unchanged, etc.).
-
-### `sync:get-settings`
-
-Get the current sync settings.
-
-- **Request:** no arguments
-- **Response:** `IpcResponse<SyncSettings>`
-  ```ts
-  interface SyncSettings {
-    enabled: boolean    // Whether periodic sync is active
-    intervalMs: number  // Sync interval in milliseconds (default: 300000 = 5 min)
-  }
-  ```
-- **Handler:** `src/main/ipc.ts` → delegates to `storage.ts`
-
-### `sync:set-settings`
-
-Update sync settings. Automatically starts/stops/restarts the periodic sync timer based on the change.
-
-- **Request:** `SyncSettings`
-- **Response:** `IpcResponse<SyncSettings>`
-- **Handler:** `src/main/ipc.ts` → delegates to `storage.ts` + `anchor-sync.ts`
-- **Notes:** When `enabled` transitions from `false` → `true`, starts periodic sync. When `true` → `false`, stops it. When `intervalMs` changes while enabled, restarts the timer. Periodic sync only syncs the **active** profile.
 
 ---
 

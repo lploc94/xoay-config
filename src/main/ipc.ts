@@ -1,19 +1,17 @@
 import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
-import type { IpcResponse, Profile, CreateProfileReq, ConfigItem, Preset, SyncResult, SyncSettings } from '../shared/types'
+import type { IpcResponse, Profile, CreateProfileReq, ConfigItem, Preset, SyncResult } from '../shared/types'
 import {
   listProfiles,
   getProfile,
   createProfile,
   updateProfile,
   deleteProfile,
-  getActiveProfileId,
-  getSyncSettings,
-  setSyncSettings
+  getActiveProfileId
 } from './storage'
 import { PRESETS, getPresetById } from './presets'
 import { importCurrentConfig, autoDetectPresets } from './import-service'
-import { syncProfile, startPeriodicSync, stopPeriodicSync } from './anchor-sync'
+import { syncProfile } from './anchor-sync'
 
 function ok<T>(data: T): IpcResponse<T> {
   return { success: true, data }
@@ -156,49 +154,6 @@ export function registerIpcHandlers(): void {
       try {
         const results = await syncProfile(profileId)
         return ok({ results })
-      } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e))
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.SYNC_GET_SETTINGS,
-    (): IpcResponse<SyncSettings> => {
-      try {
-        return ok(getSyncSettings())
-      } catch (e) {
-        return fail(String(e))
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.SYNC_SET_SETTINGS,
-    (_, settings: SyncSettings): IpcResponse<SyncSettings> => {
-      try {
-        if (typeof settings.enabled !== 'boolean' ||
-            typeof settings.intervalMs !== 'number' ||
-            !Number.isFinite(settings.intervalMs) ||
-            settings.intervalMs <= 0) {
-          return fail('Invalid settings')
-        }
-        settings.intervalMs = Math.max(10_000, Math.min(3_600_000, settings.intervalMs))
-
-        const prev = getSyncSettings()
-        const updated = setSyncSettings(settings)
-
-        // Manage periodic sync based on settings change
-        if (settings.enabled && !prev.enabled) {
-          startPeriodicSync(settings.intervalMs)
-        } else if (!settings.enabled && prev.enabled) {
-          stopPeriodicSync()
-        } else if (settings.enabled && settings.intervalMs !== prev.intervalMs) {
-          stopPeriodicSync()
-          startPeriodicSync(settings.intervalMs)
-        }
-
-        return ok(updated)
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e))
       }

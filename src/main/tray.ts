@@ -1,6 +1,7 @@
 import { Tray, Menu, nativeImage, BrowserWindow, app } from 'electron'
 import { listProfiles, getActiveProfileId, getProfile, setActiveProfileId } from './storage'
 import { switchEngine } from './switch-engine'
+import { syncProfile } from './anchor-sync'
 import trayIconPath from '../../resources/trayTemplate.png?asset'
 
 let tray: Tray | null = null
@@ -71,6 +72,16 @@ export function buildTrayMenu(): void {
 async function switchFromTray(profileId: string): Promise<void> {
   const profile = getProfile(profileId)
   if (!profile) return
+
+  // Sync active profile before switching (best-effort — never block switch)
+  const activeId = getActiveProfileId()
+  if (activeId) {
+    try {
+      await syncProfile(activeId)
+    } catch (err) {
+      console.error('Sync before tray switch failed (continuing):', err)
+    }
+  }
 
   const result = await switchEngine.switch(profile)
   if (result.success) {

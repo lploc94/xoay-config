@@ -1,9 +1,10 @@
 import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
 import type { IpcResponse, SwitchResult } from '../shared/types'
-import { getProfile, setActiveProfileId } from './storage'
+import { getProfile, getActiveProfileId, setActiveProfileId } from './storage'
 import { switchEngine } from './switch-engine'
 import { buildTrayMenu } from './tray'
+import { syncProfile } from './anchor-sync'
 
 const engine = switchEngine
 
@@ -20,6 +21,16 @@ export function registerSwitchHandlers(): void {
         const profile = getProfile(payload.profileId)
         if (!profile) {
           return { success: false, error: `Profile not found: ${payload.profileId}` }
+        }
+
+        // Sync active profile before switching (best-effort — never block switch)
+        const activeId = getActiveProfileId()
+        if (activeId) {
+          try {
+            await syncProfile(activeId)
+          } catch (err) {
+            console.error('Sync before switch failed (continuing):', err)
+          }
         }
 
         const result = await engine.switch(profile)

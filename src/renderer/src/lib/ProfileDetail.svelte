@@ -2,7 +2,7 @@
   import {
     PlayIcon, TrashIcon, PencilIcon, PlusIcon, DownloadIcon,
     FileIcon, VariableIcon, TerminalIcon,
-    CheckIcon, XIcon, RefreshCwIcon, AnchorIcon, SettingsIcon
+    CheckIcon, XIcon, RefreshCwIcon, AnchorIcon
   } from '@lucide/svelte'
   import type { Profile, ConfigItem, SyncResult } from '../../../shared/types'
 
@@ -18,13 +18,12 @@
     onImportCurrent: () => void
     onRenameProfile: (name: string) => void
     onSync: () => Promise<SyncResult[]>
-    onSyncSettings: () => void
   }
 
   let {
     profile, isActive, onSwitch, onDelete, onAddItem,
     onEditItem, onDeleteItem, onToggleItem, onImportCurrent,
-    onRenameProfile, onSync, onSyncSettings
+    onRenameProfile, onSync
   }: Props = $props()
 
   let editing = $state(false)
@@ -140,9 +139,6 @@
       </button>
       <button type="button" class="btn btn-sm preset-tonal" onclick={onImportCurrent} title="Import current config">
         <DownloadIcon class="size-4" /> Import
-      </button>
-      <button type="button" class="btn-icon btn-icon-sm hover:preset-tonal" onclick={onSyncSettings} title="Sync settings">
-        <SettingsIcon class="size-4" />
       </button>
       <button type="button" class="btn btn-sm preset-tonal text-error-500" onclick={onDelete} title="Delete profile">
         <TrashIcon class="size-4" />

@@ -5,8 +5,6 @@ import icon from '../../resources/icon.png?asset'
 import { registerSwitchHandlers } from './switch-handlers'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
-import { getSyncSettings } from './storage'
-import { startPeriodicSync, stopPeriodicSync } from './anchor-sync'
 
 function createWindow(): void {
   // Create the browser window.
@@ -66,12 +64,6 @@ app.whenReady().then(() => {
 
   createWindow()
 
-  // Start periodic sync if enabled
-  const syncSettings = getSyncSettings()
-  if (syncSettings.enabled) {
-    startPeriodicSync(syncSettings.intervalMs)
-  }
-
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
@@ -86,9 +78,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
-})
-
-// Cleanup periodic sync on quit
-app.on('before-quit', () => {
-  stopPeriodicSync()
 })
