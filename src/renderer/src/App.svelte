@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import type { Profile, ConfigItem, Preset, SwitchResult, SyncResult } from '../../shared/types'
+  import type { Profile, ConfigItem, Preset, SwitchResult, SyncResult, ProfileHook, HookDisplayValue } from '../../shared/types'
   import * as ipc from './lib/ipc'
   import Sidebar from './lib/Sidebar.svelte'
   import ProfileDetail from './lib/ProfileDetail.svelte'
   import ConfigItemForm from './lib/ConfigItemForm.svelte'
   import CreateProfileDialog from './lib/CreateProfileDialog.svelte'
   import SwitchResultDialog from './lib/SwitchResultDialog.svelte'
+  import HookForm from './lib/HookForm.svelte'
 
 
   // ── State ──────────────────────────────────────────────────────
@@ -24,19 +25,30 @@
   let switchProfileName = $state('')
   let loading = $state(false)
 
+  // Hook dialog states
+  let showHookForm = $state(false)
+  let editingHook = $state<ProfileHook | null>(null)
+  let hookNotification = $state<{ message: string; hookLabel: string } | null>(null)
+  let hookDisplayData = $state<Record<string, Record<string, HookDisplayValue>>>({})
+
   const selectedProfile = $derived(profiles.find((p) => p.id === selectedProfileId) ?? null)
+  const selectedProfileDisplayData = $derived(
+    selectedProfileId ? (hookDisplayData[selectedProfileId] ?? {}) : {}
+  )
 
   // ── Data Loading ───────────────────────────────────────────────
   async function loadData(): Promise<void> {
     try {
-      const [p, a, pr] = await Promise.all([
+      const [p, a, pr, hdd] = await Promise.all([
         ipc.listProfiles(),
         ipc.getActiveProfileId(),
-        ipc.listPresets()
+        ipc.listPresets(),
+        ipc.getHookDisplayData()
       ])
       profiles = p
       activeProfileId = a
       presets = pr
+      hookDisplayData = hdd
 
       // Select first profile if none selected
       if (!selectedProfileId && profiles.length > 0) {
@@ -54,9 +66,22 @@
 
   onMount(() => {
     loadData()
-    // Listen for profile switches from tray to refresh state
-    const unsub = ipc.onProfileSwitched(() => { loadData() })
-    return unsub
+    // Listen for profile switches from tray to show SwitchResultDialog with hook results
+    const unsub = ipc.onProfileSwitched((result) => {
+      // Show SwitchResultDialog with hook results from tray switch
+      const profile = profiles.find((p) => p.id === result.profileId)
+      switchProfileName = profile?.name ?? result.profileId
+      switchResult = result
+      loadData()
+    })
+    // Listen for hook notifications
+    const unsubHook = ipc.onHookNotify((data) => {
+      hookNotification = data
+    })
+    return () => {
+      unsub()
+      unsubHook()
+    }
   })
 
   // ── Profile Actions ────────────────────────────────────────────
@@ -201,6 +226,55 @@
     }
   }
 
+  // ── Hook Actions ──────────────────────────────────────────────
+  function handleAddHook(): void {
+    editingHook = null
+    showHookForm = true
+  }
+
+  function handleEditHook(hook: ProfileHook): void {
+    editingHook = hook
+    showHookForm = true
+  }
+
+  async function handleSaveHook(hook: ProfileHook): Promise<void> {
+    if (!selectedProfile) return
+    try {
+      if (editingHook) {
+        await ipc.updateHook(selectedProfile.id, hook)
+      } else {
+        await ipc.addHook(selectedProfile.id, hook)
+      }
+      showHookForm = false
+      editingHook = null
+      await loadData()
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  async function handleDeleteHook(hookId: string): Promise<void> {
+    if (!selectedProfile) return
+    try {
+      await ipc.deleteHook(selectedProfile.id, hookId)
+      await loadData()
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  async function handleToggleHook(hookId: string): Promise<void> {
+    if (!selectedProfile) return
+    const hook = selectedProfile.hooks.find((h) => h.id === hookId)
+    if (!hook) return
+    try {
+      await ipc.updateHook(selectedProfile.id, { ...hook, enabled: !hook.enabled })
+      await loadData()
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
   // ── Import into existing profile ───────────────────────────────
   async function handleImportIntoProfile(): Promise<void> {
     if (!selectedProfile) return
@@ -271,6 +345,8 @@
         <ProfileDetail
           profile={selectedProfile}
           isActive={activeProfileId === selectedProfile.id}
+          hookDisplayData={selectedProfileDisplayData}
+          {hookNotification}
           onSwitch={handleSwitch}
           onDelete={handleDeleteProfile}
           onAddItem={handleAddItem}
@@ -280,6 +356,11 @@
           onImportCurrent={handleImportIntoProfile}
           onRenameProfile={handleRenameProfile}
           onSync={handleSyncProfile}
+          onAddHook={handleAddHook}
+          onEditHook={handleEditHook}
+          onDeleteHook={handleDeleteHook}
+          onToggleHook={handleToggleHook}
+          onDismissHookNotification={() => hookNotification = null}
         />
       {:else}
         <div class="flex items-center justify-center h-full">
@@ -314,4 +395,12 @@
   result={switchResult}
   profileName={switchProfileName}
   onClose={() => switchResult = null}
+/>
+
+<HookForm
+  open={showHookForm}
+  hook={editingHook}
+  onSave={handleSaveHook}
+  onCancel={() => { showHookForm = false; editingHook = null }}
+  onSelectFile={ipc.selectHookFile}
 />

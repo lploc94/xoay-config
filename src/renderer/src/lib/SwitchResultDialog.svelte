@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { XIcon, CheckCircleIcon, XCircleIcon } from '@lucide/svelte'
+  import { XIcon, CheckCircleIcon, XCircleIcon, AlertTriangleIcon } from '@lucide/svelte'
   import { Dialog, Portal } from '@skeletonlabs/skeleton-svelte'
   import type { SwitchResult } from '../../../shared/types'
 
@@ -60,6 +60,27 @@
               </li>
             {/each}
           </ul>
+
+          {#if result.hookResults?.length}
+            <div class="pt-2 border-t border-surface-300-700">
+              <span class="text-xs font-semibold uppercase text-surface-500">Hooks</span>
+              <ul class="mt-1 space-y-1">
+                {#each result.hookResults as hook}
+                  <li class="flex items-center gap-2 px-3 py-2 rounded bg-surface-200-800">
+                    {#if hook.success}
+                      <CheckCircleIcon class="size-4 text-success-500 shrink-0" />
+                    {:else}
+                      <AlertTriangleIcon class="size-4 text-warning-500 shrink-0" />
+                    {/if}
+                    <span class="flex-1 text-sm">{hook.hookLabel}</span>
+                    {#if hook.error}
+                      <span class="text-xs text-warning-400">{hook.error}</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
         </div>
 
         <footer class="flex justify-end pt-2">

@@ -5,6 +5,8 @@ import icon from '../../resources/icon.png?asset'
 import { registerSwitchHandlers } from './switch-handlers'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
+import { stopCronHooks } from './cron-scheduler'
+import { ensureHookDirs, provisionBuiltinHooks } from './hook-storage'
 
 function createWindow(): void {
   // Create the browser window.
@@ -55,6 +57,10 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  // Provision hook directories and built-in hooks
+  ensureHookDirs()
+  provisionBuiltinHooks()
+
   // Register IPC handlers
   registerIpcHandlers()
   registerSwitchHandlers()
@@ -78,4 +84,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+// Stop cron hooks before app quits
+app.on('before-quit', () => {
+  stopCronHooks()
 })

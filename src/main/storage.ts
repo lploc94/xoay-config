@@ -7,7 +7,8 @@ const store = new Store<AppState>({
   name: 'xoay-config',
   defaults: {
     profiles: [],
-    activeProfileId: null
+    activeProfileId: null,
+    hookDisplayData: {}
   }
 })
 
@@ -43,6 +44,7 @@ export function createProfile(req: CreateProfileReq): Profile {
     name: req.name,
     presetId: req.presetId,
     items,
+    hooks: [],
     createdAt: now,
     updatedAt: now
   }

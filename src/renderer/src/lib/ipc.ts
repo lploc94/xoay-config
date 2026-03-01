@@ -5,6 +5,9 @@ import type {
   Preset,
   SwitchResult,
   SyncResult,
+  ProfileHook,
+  HookDisplayValue,
+  BuiltinHookInfo,
   IpcResponse
 } from '../../../shared/types'
 import { IPC_CHANNELS } from '../../../shared/types'
@@ -50,6 +53,20 @@ export const importPreview = (presetId?: string) =>
 export const syncProfile = (profileId: string) =>
   invoke<{ results: SyncResult[] }>(IPC_CHANNELS.SYNC_PROFILE, { profileId })
 
+// ── Hooks ──────────────────────────────────────────────────
+export const addHook = (profileId: string, hook: ProfileHook) =>
+  invoke<Profile>(IPC_CHANNELS.HOOK_ADD, { profileId, hook })
+export const updateHook = (profileId: string, hook: ProfileHook) =>
+  invoke<Profile>(IPC_CHANNELS.HOOK_UPDATE, { profileId, hook })
+export const deleteHook = (profileId: string, hookId: string) =>
+  invoke<Profile>(IPC_CHANNELS.HOOK_DELETE, { profileId, hookId })
+export const selectHookFile = () =>
+  invoke<string | null>(IPC_CHANNELS.HOOK_SELECT_FILE)
+export const getHookDisplayData = () =>
+  invoke<Record<string, Record<string, HookDisplayValue>>>(IPC_CHANNELS.HOOK_GET_DISPLAY_DATA)
+export const listBuiltinHooks = () =>
+  invoke<BuiltinHookInfo[]>(IPC_CHANNELS.HOOK_LIST_BUILTIN)
+
 // ── Events from main ────────────────────────────────────────
 export function onProfileSwitched(callback: (result: SwitchResult) => void): () => void {
   const handler = (_event: unknown, result: SwitchResult): void => {
@@ -58,5 +75,15 @@ export function onProfileSwitched(callback: (result: SwitchResult) => void): () 
   window.electron.ipcRenderer.on('profile:switched', handler)
   return () => {
     window.electron.ipcRenderer.removeListener('profile:switched', handler)
+  }
+}
+
+export function onHookNotify(callback: (data: { message: string; hookLabel: string }) => void): () => void {
+  const handler = (_event: unknown, data: { message: string; hookLabel: string }): void => {
+    callback(data)
+  }
+  window.electron.ipcRenderer.on('hook:notify', handler)
+  return () => {
+    window.electron.ipcRenderer.removeListener('hook:notify', handler)
   }
 }

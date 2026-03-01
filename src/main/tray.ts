@@ -1,7 +1,6 @@
 import { Tray, Menu, nativeImage, BrowserWindow, app } from 'electron'
-import { listProfiles, getActiveProfileId, getProfile, setActiveProfileId } from './storage'
-import { switchEngine } from './switch-engine'
-import { syncProfile } from './anchor-sync'
+import { listProfiles, getActiveProfileId, getProfile } from './storage'
+import { orchestrateSwitch } from './switch-orchestrator'
 import trayIconPath from '../../resources/trayTemplate.png?asset'
 
 let tray: Tray | null = null
@@ -73,25 +72,13 @@ async function switchFromTray(profileId: string): Promise<void> {
   const profile = getProfile(profileId)
   if (!profile) return
 
-  // Sync active profile before switching (best-effort — never block switch)
-  const activeId = getActiveProfileId()
-  if (activeId) {
-    try {
-      await syncProfile(activeId)
-    } catch (err) {
-      console.error('Sync before tray switch failed (continuing):', err)
-    }
-  }
-
-  const result = await switchEngine.switch(profile)
-  if (result.success) {
-    setActiveProfileId(profile.id)
-    // Notify renderer windows so they can refresh state
+  try {
+    const result = await orchestrateSwitch(profileId)
+    // Notify renderer windows so they can show SwitchResultDialog with hook results
     BrowserWindow.getAllWindows().forEach((win) => {
       win.webContents.send('profile:switched', result)
     })
+  } catch (err) {
+    console.error('Tray switch failed:', err)
   }
-
-  // Rebuild menu to update checkmarks
-  buildTrayMenu()
 }

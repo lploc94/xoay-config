@@ -12,6 +12,7 @@ import type {
   ItemResult,
   SwitchResult
 } from './types'
+import { PATHS } from './paths'
 
 /** Backup metadata — internal to switch engine, not exposed to UI. */
 interface BackupEntry {
@@ -23,8 +24,6 @@ interface BackupEntry {
 }
 
 const DEFAULT_TIMEOUT = 30_000
-const XOAY_DIR = join(homedir(), '.xoay')
-const BACKUPS_DIR = join(XOAY_DIR, 'backups')
 
 export class SwitchEngine {
   private isSwitching = false
@@ -110,7 +109,7 @@ export class SwitchEngine {
   async createBackup(profile: Profile, enabledItems: ConfigItem[]): Promise<string> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
     const backupId = `${timestamp}_${profile.id}`
-    const backupDir = join(BACKUPS_DIR, backupId)
+    const backupDir = join(PATHS.backups, backupId)
     await mkdir(backupDir, { recursive: true })
 
     // Collect all file paths that need backup
@@ -152,7 +151,7 @@ export class SwitchEngine {
    * Restore files from a backup.
    */
   async restoreBackup(backupId: string): Promise<void> {
-    const backupDir = join(BACKUPS_DIR, backupId)
+    const backupDir = join(PATHS.backups, backupId)
     const metaPath = join(backupDir, '_meta.json')
 
     if (!existsSync(metaPath)) {
@@ -179,15 +178,15 @@ export class SwitchEngine {
    * List all available backups.
    */
   async listBackups(): Promise<BackupEntry[]> {
-    if (!existsSync(BACKUPS_DIR)) {
+    if (!existsSync(PATHS.backups)) {
       return []
     }
 
-    const entries = await readdir(BACKUPS_DIR)
+    const entries = await readdir(PATHS.backups)
     const backups: BackupEntry[] = []
 
     for (const entry of entries) {
-      const metaPath = join(BACKUPS_DIR, entry, '_meta.json')
+      const metaPath = join(PATHS.backups, entry, '_meta.json')
       if (existsSync(metaPath)) {
         try {
           const meta: BackupEntry = JSON.parse(await readFile(metaPath, 'utf-8'))
