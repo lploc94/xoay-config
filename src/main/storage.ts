@@ -1,29 +1,44 @@
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
-import type { AppState, Profile, ConfigItem, CreateProfileReq } from '../shared/types'
-import { getPresetById } from './presets'
+import type { AppState, Profile, Category, ConfigItem, CreateProfileReq } from '../shared/types'
+import { getPresetById } from './preset-loader'
+import { stopCronHooks } from './cron-scheduler'
 
 const store = new Store<AppState>({
   name: 'xoay-config',
   defaults: {
+    schemaVersion: 1,
+    categories: [],
     profiles: [],
-    activeProfileId: null,
+    activeProfileIds: {},
     hookDisplayData: {}
   }
 })
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-/** Ensure profiles created before the hooks feature have hooks: [] */
+/** Ensure profiles from older versions have hooks: [] and categoryId */
 function normalizeProfile(p: Profile): Profile {
-  if (!p.hooks) return { ...p, hooks: [] }
+  const needsHooks = !p.hooks
+  const needsCategoryId = !p.categoryId
+  if (needsHooks || needsCategoryId) {
+    return {
+      ...p,
+      hooks: needsHooks ? [] : p.hooks,
+      categoryId: needsCategoryId ? '' : p.categoryId
+    }
+  }
   return p
 }
 
 // ── Profile CRUD ─────────────────────────────────────────────────
 
-export function listProfiles(): Profile[] {
-  return store.get('profiles').map(normalizeProfile)
+export function listProfiles(categoryId?: string): Profile[] {
+  const profiles = store.get('profiles').map(normalizeProfile)
+  if (categoryId !== undefined) {
+    return profiles.filter((p) => p.categoryId === categoryId)
+  }
+  return profiles
 }
 
 export function getProfile(id: string): Profile | null {
@@ -51,6 +66,7 @@ export function createProfile(req: CreateProfileReq): Profile {
   const profile: Profile = {
     id: randomUUID(),
     name: req.name,
+    categoryId: req.categoryId,
     presetId: req.presetId,
     items,
     hooks: [],
@@ -78,26 +94,106 @@ export function updateProfile(profile: Profile): Profile {
 
 export function deleteProfile(id: string): void {
   const profiles = store.get('profiles')
-  const filtered = profiles.filter((p) => p.id !== id)
-  if (filtered.length === profiles.length) {
+  const profile = profiles.find((p) => p.id === id)
+  if (!profile) {
     throw new Error(`Profile not found: ${id}`)
   }
-  store.set('profiles', filtered)
+  store.set(
+    'profiles',
+    profiles.filter((p) => p.id !== id)
+  )
 
-  // Clear active if deleted
-  if (store.get('activeProfileId') === id) {
-    store.set('activeProfileId', null)
+  // Clear active if deleted profile was active in its category
+  const activeIds = store.get('activeProfileIds')
+  const normalizedProfile = normalizeProfile(profile)
+  if (normalizedProfile.categoryId && activeIds[normalizedProfile.categoryId] === id) {
+    const { [normalizedProfile.categoryId]: _, ...rest } = activeIds
+    store.set('activeProfileIds', rest)
   }
 }
 
-// ── Active Profile ───────────────────────────────────────────────
+// ── Active Profile (per-category) ───────────────────────────────
 
-export function getActiveProfileId(): string | null {
-  return store.get('activeProfileId')
+export function getActiveProfileId(categoryId: string): string | null {
+  const activeIds = store.get('activeProfileIds')
+  return activeIds[categoryId] ?? null
 }
 
-export function setActiveProfileId(id: string | null): void {
-  store.set('activeProfileId', id)
+export function setActiveProfileId(categoryId: string, profileId: string | null): void {
+  const activeIds = store.get('activeProfileIds')
+  if (profileId === null) {
+    const { [categoryId]: _, ...rest } = activeIds
+    store.set('activeProfileIds', rest)
+  } else {
+    store.set('activeProfileIds', { ...activeIds, [categoryId]: profileId })
+  }
+}
+
+export function getAllActiveProfileIds(): Record<string, string> {
+  return store.get('activeProfileIds')
+}
+
+// ── Category CRUD ───────────────────────────────────────────────
+
+export function listCategories(): Category[] {
+  return store.get('categories')
+}
+
+export function createCategory(name: string, opts?: { icon?: string; builtIn?: boolean }): Category {
+  const now = new Date().toISOString()
+  const category: Category = {
+    id: randomUUID(),
+    name,
+    icon: opts?.icon,
+    builtIn: opts?.builtIn ?? false,
+    createdAt: now,
+    updatedAt: now
+  }
+
+  const categories = store.get('categories')
+  categories.push(category)
+  store.set('categories', categories)
+  return category
+}
+
+export function updateCategory(category: Category): Category {
+  const categories = store.get('categories')
+  const idx = categories.findIndex((c) => c.id === category.id)
+  if (idx === -1) {
+    throw new Error(`Category not found: ${category.id}`)
+  }
+  category.updatedAt = new Date().toISOString()
+  categories[idx] = category
+  store.set('categories', categories)
+  return category
+}
+
+export function deleteCategory(id: string): void {
+  const categories = store.get('categories')
+  const filtered = categories.filter((c) => c.id !== id)
+  if (filtered.length === categories.length) {
+    throw new Error(`Category not found: ${id}`)
+  }
+
+  // 1. Stop cron hooks for the active profile in this category
+  const activeIds = store.get('activeProfileIds')
+  const activeProfileId = activeIds[id]
+  if (activeProfileId) {
+    stopCronHooks(activeProfileId)
+  }
+
+  // 2. Remove activeProfileIds entry for this category
+  const { [id]: _, ...restActiveIds } = activeIds
+  store.set('activeProfileIds', restActiveIds)
+
+  // 3. Remove all profiles belonging to this category
+  store.set(
+    'profiles',
+    store.get('profiles').filter((p) => p.categoryId !== id)
+  )
+
+  // 4. Remove the category
+  store.set('categories', filtered)
 }
 
 // ── Backups ──────────────────────────────────────────────────────

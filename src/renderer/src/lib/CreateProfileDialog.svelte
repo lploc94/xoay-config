@@ -1,39 +1,57 @@
 <script lang="ts">
   import { XIcon } from '@lucide/svelte'
   import { Dialog, Portal } from '@skeletonlabs/skeleton-svelte'
-  import type { Preset } from '../../../shared/types'
+  import type { Preset, Category } from '../../../shared/types'
 
   interface Props {
     open: boolean
     presets: Preset[]
-    onCreateFromPreset: (name: string, presetId: string) => void
-    onCreateBlank: (name: string) => void
-    onImportCurrent: (name: string, presetId?: string) => void
+    categories: Category[]
+    categoryId?: string
+    onCreateFromPreset: (name: string, presetId: string, categoryId?: string) => void
+    onCreateBlank: (name: string, categoryId?: string) => void
+    onImportCurrent: (name: string, presetId?: string, categoryId?: string) => void
     onCancel: () => void
   }
 
-  let { open, presets, onCreateFromPreset, onCreateBlank, onImportCurrent, onCancel }: Props = $props()
+  let { open, presets, categories, categoryId, onCreateFromPreset, onCreateBlank, onImportCurrent, onCancel }: Props = $props()
 
   let name = $state('')
   let selectedPresetId = $state('')
+  let selectedCategoryId = $state('')
   let mode = $state<'preset' | 'blank' | 'import'>('preset')
+
+  // Filter presets by selected category. Show all if "uncategorized" or no matching presets.
+  const filteredPresets = $derived.by(() => {
+    const cat = categories.find((c) => c.id === selectedCategoryId)
+    if (!cat) return presets
+    const matching = presets.filter((p) => p.categoryName === cat.name)
+    return matching.length > 0 ? matching : presets
+  })
 
   $effect(() => {
     if (open) {
       name = ''
-      selectedPresetId = presets.length > 0 ? presets[0].id : ''
+      selectedCategoryId = categoryId ?? ''
       mode = 'preset'
+      // selectedPresetId will be set by the filteredPresets effect below
     }
+  })
+
+  // Keep selectedPresetId in sync with filteredPresets
+  $effect(() => {
+    selectedPresetId = filteredPresets.length > 0 ? filteredPresets[0].id : ''
   })
 
   function handleSubmit(): void {
     if (!name.trim()) return
+    const catId = selectedCategoryId || undefined
     if (mode === 'preset' && selectedPresetId) {
-      onCreateFromPreset(name.trim(), selectedPresetId)
+      onCreateFromPreset(name.trim(), selectedPresetId, catId)
     } else if (mode === 'import') {
-      onImportCurrent(name.trim(), selectedPresetId || undefined)
+      onImportCurrent(name.trim(), selectedPresetId || undefined, catId)
     } else {
-      onCreateBlank(name.trim())
+      onCreateBlank(name.trim(), catId)
     }
   }
 
@@ -59,6 +77,19 @@
             <label for="profile-name" class="label text-sm font-medium mb-1">Profile Name</label>
             <input id="profile-name" class="input" type="text" bind:value={name} placeholder="My Account" required />
           </div>
+
+          <!-- Category selector -->
+          {#if categories.length > 0}
+          <div>
+            <label for="category-select" class="label text-sm font-medium mb-1">Category</label>
+            <select id="category-select" class="select" bind:value={selectedCategoryId}>
+              <option value="">Uncategorized</option>
+              {#each categories as cat}
+                <option value={cat.id}>{cat.name}</option>
+              {/each}
+            </select>
+          </div>
+          {/if}
 
           <!-- Mode selector -->
           <div>
@@ -86,7 +117,7 @@
               {#if mode === 'import'}
                 <option value="">Auto-detect</option>
               {/if}
-              {#each presets as preset}
+              {#each filteredPresets as preset}
                 <option value={preset.id}>{preset.name} — {preset.description}</option>
               {/each}
             </select>

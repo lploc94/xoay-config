@@ -1,0 +1,31 @@
+{
+  "$schema": "xoay-preset/v1",
+  "id": "claude-code",
+  "name": "Claude Code",
+  "description": "Config items for Claude Code CLI (settings.json + env vars)",
+  "categoryName": "Claude Code",
+  "defaultItems": [
+    {
+      "type": "file-replace",
+      "label": "Claude settings.json",
+      "enabled": true,
+      "targetPath": "~/.claude/settings.json"
+    },
+    {
+      "type": "env-var",
+      "label": "ANTHROPIC_BASE_URL",
+      "enabled": true,
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "",
+      "shellFile": "~/.zshrc"
+    },
+    {
+      "type": "env-var",
+      "label": "ANTHROPIC_AUTH_TOKEN",
+      "enabled": true,
+      "name": "ANTHROPIC_AUTH_TOKEN",
+      "value": "",
+      "shellFile": "~/.zshrc"
+    }
+  ]
+}

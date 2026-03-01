@@ -1,5 +1,6 @@
 import { Tray, Menu, nativeImage, BrowserWindow, app } from 'electron'
-import { listProfiles, getActiveProfileId, getProfile } from './storage'
+import { listProfiles, getActiveProfileId, getProfile, listCategories, store } from './storage'
+import type { HookDisplayValue } from '../shared/types'
 import { orchestrateSwitch } from './switch-orchestrator'
 import trayIconPath from '../../resources/trayTemplate.png?asset'
 
@@ -20,27 +21,56 @@ export function createTray(): void {
 }
 
 /**
- * Rebuild the tray context menu.
- * Call this after switching profiles so the checkmark updates.
+ * Rebuild the tray context menu with category submenus.
+ * Each category shows its profiles with a checkmark on the active one.
  */
 export function buildTrayMenu(): void {
   if (!tray) return
 
-  const profiles = listProfiles()
-  const activeId = getActiveProfileId()
+  const categories = listCategories()
+  const categoryItems: Electron.MenuItemConstructorOptions[] = []
 
-  const profileItems: Electron.MenuItemConstructorOptions[] =
-    profiles.length > 0
-      ? profiles.map((p) => ({
-          label: p.name,
-          type: 'checkbox' as const,
-          checked: p.id === activeId,
-          click: () => switchFromTray(p.id)
-        }))
-      : [{ label: 'No profiles', enabled: false }]
+  for (const category of categories) {
+    const profiles = listProfiles(category.id)
+    if (profiles.length === 0) continue
+
+    const activeId = getActiveProfileId(category.id)
+    const hookDisplayData =
+      (store.get('hookDisplayData') as Record<string, Record<string, HookDisplayValue>>) ?? {}
+
+    const submenu: Electron.MenuItemConstructorOptions[] = profiles.map((p) => {
+      let label = p.name
+      if (p.id === activeId) {
+        const profileDisplay = hookDisplayData[p.id]
+        if (profileDisplay) {
+          const firstValue = Object.values(profileDisplay)[0]
+          if (firstValue?.value) {
+            const prefix = firstValue.status === 'warning' || firstValue.status === 'error' ? '⚠ ' : ''
+            label = `${p.name} (${prefix}${firstValue.value})`
+          }
+        }
+      }
+      return {
+        label,
+        type: 'checkbox' as const,
+        checked: p.id === activeId,
+        click: () => switchFromTray(p.id)
+      }
+    })
+
+    categoryItems.push({
+      label: category.name,
+      submenu
+    })
+  }
+
+  // If no categories have profiles, show a placeholder
+  if (categoryItems.length === 0) {
+    categoryItems.push({ label: 'No profiles', enabled: false })
+  }
 
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...profileItems,
+    ...categoryItems,
     { type: 'separator' },
     {
       label: 'Show Window',

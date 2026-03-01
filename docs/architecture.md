@@ -29,10 +29,10 @@ Electron apps run three processes:
 │  │ presets  │ │  tray   │ │ import-service│  │
 │  │ .ts      │ │ .ts     │ │ .ts           │  │
 │  └─────────┘ └─────────┘ └───────────────┘  │
-│  ┌───────────────┐                           │
-│  │ anchor-sync   │                           │
-│  │ .ts           │                           │
-│  └───────────────┘                           │
+│  ┌───────────────┐ ┌──────────────────────┐  │
+│  │ anchor-sync   │ │ preset-loader.ts     │  │
+│  │ .ts           │ │ migration.ts         │  │
+│  └───────────────┘ └──────────────────────┘  │
 └──────────────────┬───────────────────────────┘
                    │ IPC (ipcMain.handle / ipcRenderer.invoke)
 ┌──────────────────┴───────────────────────────┐
@@ -61,7 +61,8 @@ The main process has full Node.js and system access. It manages:
 - **Storage** (`storage.ts`) — Profile CRUD operations via `electron-store`. Data is persisted to `~/.config/xoay-config/xoay-config.json` (the default electron-store location with store name `xoay-config`).
 - **IPC handlers** (`ipc.ts`, `switch-handlers.ts`) — Handle requests from the renderer via `ipcMain.handle()`.
 - **Switch engine** (`switch-engine.ts`) — Executes config switches: file replacements, env var updates, shell commands. Manages backup and rollback.
-- **Presets** (`presets.ts`) — Defines built-in preset templates.
+- **Presets** (`presets.ts`, `preset-loader.ts`) — Loads preset templates from `.xoay-preset.json` files (built-in from `resources/presets/` and user-installed from `<userData>/presets/`). Handles import/export of portable preset files with embedded hook scripts. See [Presets](presets.md).
+- **Migration** (`migration.ts`) — Runs schema migrations at startup (v1 → v2: adds categories, converts `activeProfileId` to per-category `activeProfileIds`).
 - **Import service** (`import-service.ts`) — Reads current config files from disk to create a profile from existing settings.
 - **Anchor sync** (`anchor-sync.ts`) — Syncs stored profile items with disk content using anchors. Provides manual sync (`syncProfile`) and automatic sync-on-switch (syncs the active profile before switching to a new one).
 - **System tray** (`tray.ts`) — macOS menu bar tray icon with quick profile switching.
@@ -116,15 +117,33 @@ The build is managed by `electron-vite` with three separate build targets config
 - **preload** — Bundles `src/preload/` with `externalizeDepsPlugin`.
 - **renderer** — Bundles `src/renderer/` with Tailwind CSS and Svelte plugins.
 
-## Storage Schema
+## Storage Schema (v2)
 
 Application state is stored by `electron-store` with this schema:
 
 ```ts
 interface AppState {
-  profiles: Profile[]              // All user profiles
-  activeProfileId: string | null   // Currently active profile ID
+  schemaVersion: number                      // Current schema version (2)
+  categories: Category[]                     // Tool categories (e.g., "Claude Code", "Codex CLI")
+  profiles: Profile[]                        // All user profiles
+  activeProfileIds: Record<string, string>   // categoryId → profileId (one active per category)
+  hookDisplayData: Record<string, Record<string, HookDisplayValue>>
 }
 ```
+
+**Categories** group profiles by tool. Built-in categories (`Claude Code`, `Codex CLI`) are created during migration. Custom categories are created automatically when importing a preset with a new `categoryName`.
+
+```ts
+interface Category {
+  id: string
+  name: string
+  icon?: string       // Optional lucide icon name
+  builtIn: boolean    // true for built-in categories
+  createdAt: string
+  updatedAt: string
+}
+```
+
+**Active profiles** are tracked per-category via `activeProfileIds`. Each category can have one active profile independently. This replaced the singular `activeProfileId` from v1.
 
 The store file is located at the default electron-store path with store name `xoay-config`.

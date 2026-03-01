@@ -107,11 +107,23 @@ export interface BuiltinHookInfo {
   description: string
 }
 
+// ── Category ─────────────────────────────────────────────────────
+
+export interface Category {
+  id: string
+  name: string
+  icon?: string // optional icon name from lucide
+  builtIn: boolean // true for "Claude Code", "Codex CLI"
+  createdAt: string
+  updatedAt: string
+}
+
 // ── Profile ──────────────────────────────────────────────────────
 
 export interface Profile {
   id: string
   name: string
+  categoryId: string
   presetId?: string
   items: ConfigItem[]
   hooks: ProfileHook[]
@@ -125,7 +137,43 @@ export interface Preset {
   id: string
   name: string
   description: string
+  categoryName?: string
   defaultItems: ConfigItem[]
+  hooks?: PresetHookDef[]
+}
+
+// ── Preset File Format (.xoay-preset.json) ───────────────────────
+
+export interface PresetDefaultItem {
+  type: 'file-replace' | 'env-var' | 'run-command'
+  label: string
+  enabled: boolean
+  targetPath?: string   // file-replace
+  name?: string         // env-var
+  value?: string        // env-var
+  shellFile?: string    // env-var
+  command?: string      // run-command
+  workingDir?: string   // run-command
+  timeout?: number      // run-command
+}
+
+export interface PresetHookDef {
+  label: string
+  type: 'pre-switch-in' | 'post-switch-in' | 'pre-switch-out' | 'post-switch-out' | 'cron'
+  cronIntervalMs?: number
+  timeout?: number
+  scriptFile: string // key into scripts object
+}
+
+export interface PresetFile {
+  $schema: string
+  id: string
+  name: string
+  description: string
+  categoryName: string
+  defaultItems: PresetDefaultItem[]
+  hooks?: PresetHookDef[]
+  scripts?: Record<string, string> // filename → base64 encoded content
 }
 
 // ── Switch Result ────────────────────────────────────────────────
@@ -160,8 +208,10 @@ export interface SyncResult {
 // ── App State (electron-store schema) ────────────────────────────
 
 export interface AppState {
+  schemaVersion: number
+  categories: Category[]
   profiles: Profile[]
-  activeProfileId: string | null
+  activeProfileIds: Record<string, string> // categoryId → profileId
   hookDisplayData: Record<string, Record<string, HookDisplayValue>>
 }
 
@@ -175,11 +225,16 @@ export interface IpcResponse<T = unknown> {
 
 export interface CreateProfileReq {
   name: string
+  categoryId: string
   presetId?: string
   items?: ConfigItem[]
 }
 
 export const IPC_CHANNELS = {
+  CATEGORY_LIST: 'category:list',
+  CATEGORY_CREATE: 'category:create',
+  CATEGORY_UPDATE: 'category:update',
+  CATEGORY_DELETE: 'category:delete',
   PROFILE_LIST: 'profile:list',
   PROFILE_GET: 'profile:get',
   PROFILE_CREATE: 'profile:create',
@@ -198,5 +253,7 @@ export const IPC_CHANNELS = {
   HOOK_DELETE: 'hook:delete',
   HOOK_SELECT_FILE: 'hook:select-file',
   HOOK_GET_DISPLAY_DATA: 'hook:get-display-data',
-  HOOK_LIST_BUILTIN: 'hook:list-builtin'
+  HOOK_LIST_BUILTIN: 'hook:list-builtin',
+  PRESET_IMPORT: 'preset:import',
+  PRESET_EXPORT: 'preset:export'
 } as const

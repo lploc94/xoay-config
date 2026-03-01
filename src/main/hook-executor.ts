@@ -1,9 +1,10 @@
-import { utilityProcess, BrowserWindow } from 'electron'
+import { utilityProcess, BrowserWindow, Notification } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { store } from './storage'
+import { store, getProfile } from './storage'
 import { resolveHookPath } from './hook-storage'
+import { buildTrayMenu } from './tray'
 import type {
   ProfileHook,
   HookContext,
@@ -22,7 +23,7 @@ let isSwitching = false
 
 /** Callback for auto-switch actions. Set via setAutoSwitchHandler() to avoid circular imports. */
 let autoSwitchHandler:
-  | ((request: { type: 'switchToProfile' | 'switchToNextProfile'; profileId?: string; triggeredBy: string }) => void)
+  | ((request: { type: 'switchToProfile' | 'switchToNextProfile'; profileId?: string; triggeringProfileId?: string; triggeredBy: string }) => void)
   | null = null
 
 /**
@@ -193,6 +194,9 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
  * Merge display data from hook results into AppState.hookDisplayData[profileId].
  * Merge semantics: only fields present in output are updated; missing fields are NOT cleared;
  * fields with null value are explicitly cleared.
+ *
+ * Detects status transitions (ok→warning, ok→error, warning→error) and fires
+ * system notifications to alert the user.
  */
 export function mergeDisplayData(
   profileId: string,
@@ -202,7 +206,26 @@ export function mergeDisplayData(
     (store.get('hookDisplayData') as Record<string, Record<string, HookDisplayValue>>) ?? {}
   const existing = allDisplayData[profileId] ?? {}
 
+  // Detect status transitions before merging
+  const profile = getProfile(profileId)
+  const profileName = profile?.name ?? profileId
+
   for (const [key, value] of Object.entries(display)) {
+    // Check for status degradation transitions before applying merge
+    if (value && value.value !== null && value.status) {
+      const oldStatus = existing[key]?.status ?? 'ok'
+      const newStatus = value.status
+      const isDegraded =
+        (oldStatus === 'ok' && (newStatus === 'warning' || newStatus === 'error')) ||
+        (oldStatus === 'warning' && newStatus === 'error')
+
+      if (isDegraded) {
+        const label = value.label ?? key
+        showSystemNotification('Xoay', `${profileName} ${label} dropped to ${value.value}`)
+      }
+    }
+
+    // Apply merge
     if (value === null || value.value === null) {
       delete existing[key]
     } else {
@@ -212,6 +235,12 @@ export function mergeDisplayData(
 
   allDisplayData[profileId] = existing
   store.set('hookDisplayData', allDisplayData)
+
+  // Push updated display data to all renderer windows in real-time
+  sendToRenderer('hook:display-update', { profileId, displayData: existing })
+
+  // Rebuild tray menu so quota info is visible in system tray
+  buildTrayMenu()
 }
 
 /**
@@ -223,7 +252,8 @@ export function mergeDisplayData(
  */
 export function processHookActions(
   result: HookResult,
-  hookType: ProfileHook['type']
+  hookType: ProfileHook['type'],
+  triggeringProfileId?: string
 ): void {
   if (!result.success || !result.actions) return
 
@@ -256,6 +286,7 @@ export function processHookActions(
         autoSwitchHandler({
           type: 'switchToProfile',
           profileId: actions.switchToProfile,
+          triggeringProfileId,
           triggeredBy: result.hookLabel
         })
       } else if (actions.switchToNextProfile) {
@@ -264,6 +295,7 @@ export function processHookActions(
         )
         autoSwitchHandler({
           type: 'switchToNextProfile',
+          triggeringProfileId,
           triggeredBy: result.hookLabel
         })
       }
@@ -274,12 +306,13 @@ export function processHookActions(
     )
   }
 
-  // Notify action: emit to renderer
+  // Notify action: emit to renderer + system notification
   if (actions.notify) {
     sendToRenderer('hook:notify', {
       message: actions.notify,
       hookLabel: result.hookLabel
     })
+    showSystemNotification('Xoay', actions.notify)
   }
 }
 
@@ -290,4 +323,13 @@ function sendToRenderer(channel: string, data: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, data)
   }
+}
+
+/**
+ * Show a macOS system notification if supported and no app window is focused.
+ */
+function showSystemNotification(title: string, body: string): void {
+  if (!Notification.isSupported()) return
+  if (BrowserWindow.getAllWindows().some((w) => w.isFocused())) return
+  new Notification({ title, body }).show()
 }

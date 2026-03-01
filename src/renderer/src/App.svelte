@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import type { Profile, ConfigItem, Preset, SwitchResult, SyncResult, ProfileHook, HookDisplayValue } from '../../shared/types'
+  import type { Profile, Category, ConfigItem, Preset, SwitchResult, SyncResult, ProfileHook, HookDisplayValue } from '../../shared/types'
   import * as ipc from './lib/ipc'
   import Sidebar from './lib/Sidebar.svelte'
   import ProfileDetail from './lib/ProfileDetail.svelte'
@@ -12,13 +12,15 @@
 
   // ── State ──────────────────────────────────────────────────────
   let profiles = $state<Profile[]>([])
-  let activeProfileId = $state<string | null>(null)
+  let categories = $state<Category[]>([])
+  let activeProfileIds = $state<Record<string, string>>({})
   let selectedProfileId = $state<string | null>(null)
   let presets = $state<Preset[]>([])
   let error = $state<string | null>(null)
 
   // Dialog states
   let showCreateDialog = $state(false)
+  let createForCategoryId = $state<string | undefined>(undefined)
   let showItemForm = $state(false)
   let editingItem = $state<ConfigItem | null>(null)
   let switchResult = $state<SwitchResult | null>(null)
@@ -32,6 +34,11 @@
   let hookDisplayData = $state<Record<string, Record<string, HookDisplayValue>>>({})
 
   const selectedProfile = $derived(profiles.find((p) => p.id === selectedProfileId) ?? null)
+  const isSelectedProfileActive = $derived(
+    selectedProfile
+      ? activeProfileIds[selectedProfile.categoryId] === selectedProfile.id
+      : false
+  )
   const selectedProfileDisplayData = $derived(
     selectedProfileId ? (hookDisplayData[selectedProfileId] ?? {}) : {}
   )
@@ -39,16 +46,18 @@
   // ── Data Loading ───────────────────────────────────────────────
   async function loadData(): Promise<void> {
     try {
-      const [p, a, pr, hdd] = await Promise.all([
+      const [p, a, pr, hdd, cats] = await Promise.all([
         ipc.listProfiles(),
-        ipc.getActiveProfileId(),
+        ipc.getAllActiveProfileIds(),
         ipc.listPresets(),
-        ipc.getHookDisplayData()
+        ipc.getHookDisplayData(),
+        ipc.listCategories()
       ])
       profiles = p
-      activeProfileId = a
+      activeProfileIds = a
       presets = pr
       hookDisplayData = hdd
+      categories = cats
 
       // Select first profile if none selected
       if (!selectedProfileId && profiles.length > 0) {
@@ -78,17 +87,40 @@
     const unsubHook = ipc.onHookNotify((data) => {
       hookNotification = data
     })
+    // Listen for real-time hook display data updates
+    const unsubDisplayUpdate = ipc.onHookDisplayUpdate(({ profileId, displayData }) => {
+      hookDisplayData = { ...hookDisplayData, [profileId]: displayData }
+    })
     return () => {
       unsub()
       unsubHook()
+      unsubDisplayUpdate()
     }
   })
 
+  // ── Helpers ──────────────────────────────────────────────────────
+  /** Map presetId to the corresponding category. Falls back to first category. */
+  const PRESET_CATEGORY_MAP: Record<string, string> = {
+    'claude-code': 'cat-claude-code',
+    'codex-cli': 'cat-codex-cli'
+  }
+
+  function categoryIdForPreset(presetId?: string): string {
+    if (presetId && PRESET_CATEGORY_MAP[presetId]) {
+      return PRESET_CATEGORY_MAP[presetId]
+    }
+    // Fallback to first non-builtin category, or first category
+    const fallback = categories.find((c) => !c.builtIn) ?? categories[0]
+    return fallback?.id ?? ''
+  }
+
   // ── Profile Actions ────────────────────────────────────────────
-  async function handleCreateFromPreset(name: string, presetId: string): Promise<void> {
+  async function handleCreateFromPreset(name: string, presetId: string, catId?: string): Promise<void> {
     try {
-      const profile = await ipc.createProfile({ name, presetId })
+      const categoryId = catId ?? categoryIdForPreset(presetId)
+      const profile = await ipc.createProfile({ name, categoryId, presetId })
       showCreateDialog = false
+      createForCategoryId = undefined
       await loadData()
       selectedProfileId = profile.id
     } catch (e) {
@@ -96,10 +128,12 @@
     }
   }
 
-  async function handleCreateBlank(name: string): Promise<void> {
+  async function handleCreateBlank(name: string, catId?: string): Promise<void> {
     try {
-      const profile = await ipc.createProfile({ name })
+      const categoryId = catId ?? categoryIdForPreset()
+      const profile = await ipc.createProfile({ name, categoryId })
       showCreateDialog = false
+      createForCategoryId = undefined
       await loadData()
       selectedProfileId = profile.id
     } catch (e) {
@@ -107,11 +141,13 @@
     }
   }
 
-  async function handleImportCurrent(name: string, presetId?: string): Promise<void> {
+  async function handleImportCurrent(name: string, presetId?: string, catId?: string): Promise<void> {
     try {
       loading = true
-      const profile = await ipc.importCurrentConfig(name, presetId)
+      const categoryId = catId ?? categoryIdForPreset(presetId)
+      const profile = await ipc.importCurrentConfig(name, categoryId, presetId)
       showCreateDialog = false
+      createForCategoryId = undefined
       await loadData()
       selectedProfileId = profile.id
     } catch (e) {
@@ -275,6 +311,37 @@
     }
   }
 
+  // ── Category Actions ────────────────────────────────────────────
+  async function handleAddCategory(): Promise<void> {
+    const name = prompt('New category name:')
+    if (!name?.trim()) return
+    try {
+      await ipc.createCategory(name.trim())
+      await loadData()
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  // ── Preset Import / Export ─────────────────────────────────────
+  async function handleImportPreset(): Promise<void> {
+    try {
+      const result = await ipc.importPreset()
+      if (!result) return // user cancelled dialog
+      await loadData()
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  async function handleExportPreset(presetId: string): Promise<void> {
+    try {
+      await ipc.exportPreset(presetId)
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
   // ── Import into existing profile ───────────────────────────────
   async function handleImportIntoProfile(): Promise<void> {
     if (!selectedProfile) return
@@ -332,11 +399,17 @@
   <div class="flex flex-1 min-h-0">
     <!-- Sidebar -->
     <Sidebar
+      {categories}
       {profiles}
-      {activeProfileId}
+      {presets}
+      {activeProfileIds}
       {selectedProfileId}
+      {hookDisplayData}
       onSelect={(id) => selectedProfileId = id}
-      onCreateNew={() => showCreateDialog = true}
+      onCreateNew={(categoryId) => { createForCategoryId = categoryId; showCreateDialog = true }}
+      onAddCategory={handleAddCategory}
+      onImportPreset={handleImportPreset}
+      onExportPreset={handleExportPreset}
     />
 
     <!-- Detail -->
@@ -344,7 +417,7 @@
       {#if selectedProfile}
         <ProfileDetail
           profile={selectedProfile}
-          isActive={activeProfileId === selectedProfile.id}
+          isActive={isSelectedProfileActive}
           hookDisplayData={selectedProfileDisplayData}
           {hookNotification}
           onSwitch={handleSwitch}
@@ -378,10 +451,12 @@
 <CreateProfileDialog
   open={showCreateDialog}
   {presets}
+  {categories}
+  categoryId={createForCategoryId}
   onCreateFromPreset={handleCreateFromPreset}
   onCreateBlank={handleCreateBlank}
   onImportCurrent={handleImportCurrent}
-  onCancel={() => showCreateDialog = false}
+  onCancel={() => { showCreateDialog = false; createForCategoryId = undefined }}
 />
 
 <ConfigItemForm

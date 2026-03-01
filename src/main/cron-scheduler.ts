@@ -4,19 +4,24 @@ import type { ProfileHook, HookContext } from '../shared/types'
 
 const MIN_INTERVAL_MS = 10_000
 
-/** Active interval handles keyed by hook ID */
+/** Active interval handles keyed by `${profileId}:${hookId}` */
 const activeIntervals = new Map<string, ReturnType<typeof setInterval>>()
 
-let activeProfileId: string | null = null
+/** Track which profiles have active crons */
+const activeProfileIds = new Set<string>()
+
+function intervalKey(profileId: string, hookId: string): string {
+  return `${profileId}:${hookId}`
+}
 
 /**
  * Start all enabled cron hooks for the given profile.
- * Each hook runs independently on its own setInterval.
- * Call stopCronHooks() before calling this to avoid duplicates.
+ * This is additive — it does not stop crons for other profiles.
+ * Safe to call multiple times for different profiles.
  */
 export function startCronHooks(profileId: string): void {
-  // Safety: stop any existing cron hooks first
-  stopCronHooks()
+  // Stop any existing crons for THIS profile only (avoid duplicates)
+  stopCronHooks(profileId)
 
   const profile = getProfile(profileId)
   if (!profile) {
@@ -24,7 +29,7 @@ export function startCronHooks(profileId: string): void {
     return
   }
 
-  activeProfileId = profileId
+  activeProfileIds.add(profileId)
 
   const cronHooks = profile.hooks.filter(
     (h): h is ProfileHook & { type: 'cron' } => h.type === 'cron' && h.enabled
@@ -40,8 +45,8 @@ export function startCronHooks(profileId: string): void {
     const interval = Math.max(hook.cronIntervalMs ?? 60_000, MIN_INTERVAL_MS)
 
     const runHook = async (): Promise<void> => {
-      // Re-check profile is still active (guard against race conditions)
-      if (activeProfileId !== profileId) return
+      // Re-check profile is still tracked
+      if (!activeProfileIds.has(profileId)) return
 
       const currentProfile = getProfile(profileId)
       if (!currentProfile) return
@@ -50,10 +55,11 @@ export function startCronHooks(profileId: string): void {
       const currentHook = currentProfile.hooks.find((h) => h.id === hook.id)
       if (!currentHook || !currentHook.enabled) {
         console.log(`[cron-scheduler] Hook "${hook.label}" disabled or removed — stopping`)
-        const handle = activeIntervals.get(hook.id)
+        const key = intervalKey(profileId, hook.id)
+        const handle = activeIntervals.get(key)
         if (handle) {
           clearInterval(handle)
-          activeIntervals.delete(hook.id)
+          activeIntervals.delete(key)
         }
         return
       }
@@ -73,8 +79,8 @@ export function startCronHooks(profileId: string): void {
           mergeDisplayData(profileId, result.display)
         }
 
-        // Process actions (auto-switch, notify)
-        processHookActions(result, 'cron')
+        // Process actions (auto-switch, notify) — pass profileId for category-scoped switching
+        processHookActions(result, 'cron', profileId)
 
         if (!result.success) {
           console.error(
@@ -89,8 +95,9 @@ export function startCronHooks(profileId: string): void {
       }
     }
 
+    const key = intervalKey(profileId, hook.id)
     const handle = setInterval(runHook, interval)
-    activeIntervals.set(hook.id, handle)
+    activeIntervals.set(key, handle)
 
     console.log(
       `[cron-scheduler]   → "${hook.label}" every ${interval}ms`
@@ -99,15 +106,36 @@ export function startCronHooks(profileId: string): void {
 }
 
 /**
- * Stop all running cron hooks. Safe to call even if none are running.
+ * Stop cron hooks.
+ * - If profileId is given, stop only that profile's crons.
+ * - If no arg, stop all crons across all profiles.
  */
-export function stopCronHooks(): void {
-  if (activeIntervals.size > 0) {
-    console.log(`[cron-scheduler] Stopping ${activeIntervals.size} cron hook(s)`)
-    for (const [, handle] of activeIntervals) {
-      clearInterval(handle)
+export function stopCronHooks(profileId?: string): void {
+  if (profileId) {
+    // Stop only this profile's crons
+    const keysToRemove: string[] = []
+    for (const [key, handle] of activeIntervals) {
+      if (key.startsWith(`${profileId}:`)) {
+        clearInterval(handle)
+        keysToRemove.push(key)
+      }
     }
-    activeIntervals.clear()
+    if (keysToRemove.length > 0) {
+      console.log(`[cron-scheduler] Stopping ${keysToRemove.length} cron hook(s) for profile "${profileId}"`)
+      for (const key of keysToRemove) {
+        activeIntervals.delete(key)
+      }
+    }
+    activeProfileIds.delete(profileId)
+  } else {
+    // Stop all crons
+    if (activeIntervals.size > 0) {
+      console.log(`[cron-scheduler] Stopping all ${activeIntervals.size} cron hook(s)`)
+      for (const [, handle] of activeIntervals) {
+        clearInterval(handle)
+      }
+      activeIntervals.clear()
+    }
+    activeProfileIds.clear()
   }
-  activeProfileId = null
 }

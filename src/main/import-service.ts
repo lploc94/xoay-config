@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { ConfigItem, EnvVarItem, FileReplaceItem } from '../shared/types'
-import { PRESETS } from './presets'
+import { getAllPresets } from './presets'
 
 function expandHome(p: string): string {
   if (p.startsWith('~/')) {
@@ -48,7 +48,7 @@ export async function importCurrentConfig(presetId?: string): Promise<ConfigItem
   const shellCache = new Map<string, string | null>()
 
   for (const pid of presetIds) {
-    const preset = PRESETS.find((p) => p.id === pid)
+    const preset = getAllPresets().find((p) => p.id === pid)
     if (!preset) continue
 
     for (const template of preset.defaultItems) {
@@ -101,7 +101,7 @@ export async function importCurrentConfig(presetId?: string): Promise<ConfigItem
 export async function autoDetectPresets(): Promise<string[]> {
   const detected: string[] = []
 
-  for (const preset of PRESETS) {
+  for (const preset of getAllPresets()) {
     for (const item of preset.defaultItems) {
       if (item.type === 'file-replace') {
         const absPath = expandHome((item as FileReplaceItem).targetPath)

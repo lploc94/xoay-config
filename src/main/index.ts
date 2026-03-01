@@ -5,8 +5,10 @@ import icon from '../../resources/icon.png?asset'
 import { registerSwitchHandlers } from './switch-handlers'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
-import { stopCronHooks } from './cron-scheduler'
+import { startCronHooks, stopCronHooks } from './cron-scheduler'
+import { getAllActiveProfileIds } from './storage'
 import { ensureHookDirs, provisionBuiltinHooks } from './hook-storage'
+import { runMigrations } from './migration'
 
 function createWindow(): void {
   // Create the browser window.
@@ -61,6 +63,9 @@ app.whenReady().then(() => {
   ensureHookDirs()
   provisionBuiltinHooks()
 
+  // Run data migrations (must happen before IPC handlers / tray)
+  runMigrations()
+
   // Register IPC handlers
   registerIpcHandlers()
   registerSwitchHandlers()
@@ -69,6 +74,14 @@ app.whenReady().then(() => {
   createTray()
 
   createWindow()
+
+  // Start cron hooks for all active profiles across categories
+  const activeIds = getAllActiveProfileIds()
+  for (const profileId of Object.values(activeIds)) {
+    if (profileId) {
+      startCronHooks(profileId)
+    }
+  }
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the

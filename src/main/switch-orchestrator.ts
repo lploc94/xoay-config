@@ -13,8 +13,16 @@ setAutoSwitchHandler((request) => {
   if (request.type === 'switchToProfile' && request.profileId) {
     targetProfileId = request.profileId
   } else if (request.type === 'switchToNextProfile') {
-    const profiles = listProfiles()
-    const activeId = getActiveProfileId()
+    // Determine category from the triggering profile
+    const triggeringProfile = request.triggeringProfileId
+      ? getProfile(request.triggeringProfileId)
+      : null
+
+    if (!triggeringProfile) return
+
+    const categoryId = triggeringProfile.categoryId
+    const profiles = listProfiles(categoryId)
+    const activeId = getActiveProfileId(categoryId)
     if (profiles.length < 2) return
     const currentIdx = profiles.findIndex((p) => p.id === activeId)
     const nextIdx = (currentIdx + 1) % profiles.length
@@ -53,7 +61,7 @@ async function runHooks(
         mergeDisplayData(profile.id, result.display)
       }
       // Process actions (notify, auto-switch, etc.)
-      processHookActions(result, hookType)
+      processHookActions(result, hookType, profile.id)
       results.push(result)
     } catch (err) {
       results.push({
@@ -78,7 +86,7 @@ async function runHooks(
  * 4. Run post-switch-out hooks on OLD profile
  * 5. switchEngine.switch(newProfile) — files replaced here
  * 6. Run pre-switch-in hooks on NEW profile
- * 7. Update activeProfileId
+ * 7. Update activeProfileId (per-category)
  * 8. Run post-switch-in hooks on NEW profile
  * 9. Start cron hooks for NEW profile
  * 10. Return SwitchResult with hookResults
@@ -89,16 +97,18 @@ export async function orchestrateSwitch(profileId: string): Promise<SwitchResult
     throw new Error(`Profile not found: ${profileId}`)
   }
 
+  const categoryId = profile.categoryId
+
   setIsSwitching(true)
   try {
     const allHookResults: HookResult[] = []
-    const oldProfileId = getActiveProfileId()
+    const oldProfileId = getActiveProfileId(categoryId)
     const oldProfile = oldProfileId ? getProfile(oldProfileId) : null
 
-    // Steps 1-4: Old profile hooks (only if there is an active profile)
+    // Steps 1-4: Old profile hooks (only if there is an active profile in this category)
     if (oldProfile) {
       // Step 1: Stop cron hooks for OLD profile
-      stopCronHooks()
+      stopCronHooks(oldProfile.id)
 
       // Step 2: pre-switch-out hooks on OLD profile
       const preOutResults = await runHooks(oldProfile.hooks, 'pre-switch-out', oldProfile)
@@ -125,8 +135,8 @@ export async function orchestrateSwitch(profileId: string): Promise<SwitchResult
       const preInResults = await runHooks(profile.hooks, 'pre-switch-in', profile)
       allHookResults.push(...preInResults)
 
-      // Step 7: Update activeProfileId
-      setActiveProfileId(profile.id)
+      // Step 7: Update activeProfileId (per-category)
+      setActiveProfileId(categoryId, profile.id)
 
       // Step 8: post-switch-in hooks on NEW profile
       const postInResults = await runHooks(profile.hooks, 'post-switch-in', profile)

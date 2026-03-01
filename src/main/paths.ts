@@ -19,6 +19,7 @@ let _paths: {
   readonly backups: string
   readonly hooks: string
   readonly hooksBuiltin: string
+  readonly presets: string
 } | null = null
 
 function init(): typeof _paths & object {
@@ -29,6 +30,7 @@ function init(): typeof _paths & object {
     backups: path.join(userData, 'backups'),
     hooks: path.join(userData, 'hooks'),
     hooksBuiltin: path.join(userData, 'hooks', 'builtin'),
+    presets: path.join(userData, 'presets'),
   } as const
   return _paths
 }
@@ -39,4 +41,5 @@ export const PATHS = {
   get backups(): string { return init().backups },
   get hooks(): string { return init().hooks },
   get hooksBuiltin(): string { return init().hooksBuiltin },
+  get presets(): string { return init().presets },
 } as const

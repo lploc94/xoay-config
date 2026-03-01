@@ -3,7 +3,7 @@
     PlayIcon, TrashIcon, PencilIcon, PlusIcon, DownloadIcon,
     FileIcon, VariableIcon, TerminalIcon,
     CheckIcon, XIcon, RefreshCwIcon, AnchorIcon,
-    ZapIcon
+    ZapIcon, ClockIcon
   } from '@lucide/svelte'
   import type { Profile, ConfigItem, ProfileHook, SyncResult, HookDisplayValue } from '../../../shared/types'
 
@@ -142,10 +142,38 @@
 
   const hookDisplayEntries = $derived(Object.entries(hookDisplayData))
 
-  function displayStatusColor(status?: 'ok' | 'warning' | 'error'): string {
-    if (status === 'warning') return 'bg-warning-500/20 text-warning-400 border-warning-500/30'
-    if (status === 'error') return 'bg-error-500/20 text-error-400 border-error-500/30'
-    return 'bg-success-500/20 text-success-400 border-success-500/30'
+  let lastUpdated = $state<Date | null>(null)
+
+  $effect(() => {
+    if (hookDisplayEntries.length > 0) {
+      lastUpdated = new Date()
+    }
+  })
+
+  function relativeTime(date: Date): string {
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+    if (seconds < 10) return 'just now'
+    if (seconds < 60) return `${seconds}s ago`
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    return `${hours}h ago`
+  }
+
+  let relativeTimeStr = $state('')
+  $effect(() => {
+    if (!lastUpdated) return
+    // Update relative time every 10 seconds
+    const update = () => { relativeTimeStr = relativeTime(lastUpdated!) }
+    update()
+    const interval = setInterval(update, 10_000)
+    return () => clearInterval(interval)
+  })
+
+  function displayStatusBorder(status?: 'ok' | 'warning' | 'error'): string {
+    if (status === 'warning') return 'border-warning-500/40'
+    if (status === 'error') return 'border-error-500/40'
+    return 'border-success-500/40'
   }
 </script>
 
@@ -192,6 +220,26 @@
 
   <!-- Config Items -->
   <div class="flex-1 overflow-y-auto p-5 space-y-4">
+    <!-- Status Card -->
+    {#if hookDisplayEntries.length > 0}
+      <div class="rounded-lg border border-surface-200-800 bg-surface-100-900 overflow-hidden">
+        <div class="grid gap-px bg-surface-200-800" style="grid-template-columns: repeat({Math.min(hookDisplayEntries.length, 3)}, 1fr);">
+          {#each hookDisplayEntries as [key, val]}
+            <div class="px-4 py-3 bg-surface-50-950 border-l-2 {displayStatusBorder(val.status)}">
+              <p class="text-lg font-bold {val.status === 'warning' ? 'text-warning-400' : val.status === 'error' ? 'text-error-400' : 'text-success-400'}">{val.value}</p>
+              <p class="text-xs text-surface-400 mt-0.5">{val.label ?? key}</p>
+            </div>
+          {/each}
+        </div>
+        {#if lastUpdated}
+          <div class="px-4 py-1.5 border-t border-surface-200-800 flex items-center gap-1 text-xs text-surface-400">
+            <ClockIcon class="size-3" />
+            <span>Updated {relativeTimeStr}</span>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     <!-- Sync Results Banner -->
     {#if syncResults}
       {@const syncedCount = syncResults.filter(r => r.synced).length}
@@ -287,18 +335,6 @@
     <button type="button" class="btn preset-tonal w-full" onclick={onAddItem}>
       <PlusIcon class="size-4" /> Add Config Item
     </button>
-
-    <!-- Hook Display Data -->
-    {#if hookDisplayEntries.length > 0}
-      <div class="flex flex-wrap gap-2 pt-2">
-        {#each hookDisplayEntries as [key, val]}
-          <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border {displayStatusColor(val.status)}">
-            <span class="font-medium">{val.label ?? key}:</span>
-            <span>{val.value}</span>
-          </span>
-        {/each}
-      </div>
-    {/if}
 
     <!-- Hook Notification Banner -->
     {#if hookNotification}
