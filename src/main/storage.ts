@@ -12,15 +12,24 @@ const store = new Store<AppState>({
   }
 })
 
+// ── Helpers ──────────────────────────────────────────────────────
+
+/** Ensure profiles created before the hooks feature have hooks: [] */
+function normalizeProfile(p: Profile): Profile {
+  if (!p.hooks) return { ...p, hooks: [] }
+  return p
+}
+
 // ── Profile CRUD ─────────────────────────────────────────────────
 
 export function listProfiles(): Profile[] {
-  return store.get('profiles')
+  return store.get('profiles').map(normalizeProfile)
 }
 
 export function getProfile(id: string): Profile | null {
   const profiles = store.get('profiles')
-  return profiles.find((p) => p.id === id) ?? null
+  const found = profiles.find((p) => p.id === id)
+  return found ? normalizeProfile(found) : null
 }
 
 export function createProfile(req: CreateProfileReq): Profile {
