@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRightIcon, PlusIcon, UserIcon, FolderIcon, ImportIcon, DownloadIcon } from '@lucide/svelte'
+  import { ChevronRightIcon, PlusIcon, UserIcon, FolderIcon, ImportIcon, DownloadIcon, Trash2Icon } from '@lucide/svelte'
   import { Collapsible } from '@skeletonlabs/skeleton-svelte'
   import type { Profile, Category, Preset, HookDisplayValue } from '../../../shared/types'
 
@@ -12,12 +12,13 @@
     hookDisplayData: Record<string, Record<string, HookDisplayValue>>
     onSelect: (id: string) => void
     onCreateNew: (categoryId?: string) => void
-    onAddCategory: () => void
+    onAddCategory: (name: string) => void
+    onDeleteCategory: (id: string) => void
     onImportPreset: () => void
     onExportPreset: (presetId: string) => void
   }
 
-  let { categories, profiles, presets, activeProfileIds, selectedProfileId, hookDisplayData, onSelect, onCreateNew, onAddCategory, onImportPreset, onExportPreset }: Props = $props()
+  let { categories, profiles, presets, activeProfileIds, selectedProfileId, hookDisplayData, onSelect, onCreateNew, onAddCategory, onDeleteCategory, onImportPreset, onExportPreset }: Props = $props()
 
   function profilesForCategory(categoryId: string): Profile[] {
     return profiles.filter((p) => p.categoryId === categoryId)
@@ -50,6 +51,24 @@
     warning: 'bg-warning-500',
     error: 'bg-error-500'
   }
+
+  let addingCategory = $state(false)
+  let newCategoryName = $state('')
+  let deletingCategoryId = $state<string | null>(null)
+
+  function confirmAddCategory(): void {
+    const name = newCategoryName.trim()
+    if (name) {
+      onAddCategory(name)
+    }
+    addingCategory = false
+    newCategoryName = ''
+  }
+
+  function cancelAddCategory(): void {
+    addingCategory = false
+    newCategoryName = ''
+  }
 </script>
 
 <aside class="flex flex-col h-full border-r border-surface-200-800 w-[220px] bg-surface-50-950">
@@ -66,6 +85,21 @@
       <Collapsible defaultOpen={true}>
         <div class="px-2 py-1">
           <!-- Category header trigger -->
+          {#if deletingCategoryId === category.id}
+            <div class="flex items-center gap-1.5 px-2 py-1.5 text-sm">
+              <span class="flex-1 truncate text-warning-500">Delete {category.name}?</span>
+              <button
+                type="button"
+                class="btn btn-sm preset-filled-error-500 px-2 py-0.5 text-xs"
+                onclick={() => { onDeleteCategory(category.id); deletingCategoryId = null }}
+              >Yes</button>
+              <button
+                type="button"
+                class="btn btn-sm preset-tonal px-2 py-0.5 text-xs"
+                onclick={() => deletingCategoryId = null}
+              >No</button>
+            </div>
+          {:else}
           <Collapsible.Trigger class="btn hover:preset-tonal justify-start px-2 w-full text-left gap-1.5 group">
             <ChevronRightIcon class="size-3.5 shrink-0 text-surface-400 transition-transform duration-200 group-data-[state=open]:rotate-90" />
             <FolderIcon class="size-3.5 shrink-0 text-surface-400" />
@@ -83,6 +117,16 @@
             >
               <PlusIcon class="size-3.5 text-surface-400" />
             </button>
+            {#if !category.builtIn}
+              <button
+                type="button"
+                class="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-surface-300/20 transition-opacity"
+                title="Delete {category.name}"
+                onclick={(e) => { e.stopPropagation(); deletingCategoryId = category.id }}
+              >
+                <Trash2Icon class="size-3.5 text-surface-400" />
+              </button>
+            {/if}
             {#if presetForCategory(category.id)}
               <button
                 type="button"
@@ -94,6 +138,7 @@
               </button>
             {/if}
           </Collapsible.Trigger>
+          {/if}
 
           <!-- Profiles under this category -->
           <Collapsible.Content>
@@ -127,6 +172,26 @@
       </Collapsible>
     {/each}
 
+    {#if addingCategory}
+      <div class="px-2 py-1">
+        <div class="flex items-center gap-1.5 px-2">
+          <FolderIcon class="size-3.5 shrink-0 text-surface-400" />
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            type="text"
+            class="input text-sm px-2 py-1 flex-1 min-w-0"
+            placeholder="Category name"
+            bind:value={newCategoryName}
+            autofocus
+            onkeydown={(e: KeyboardEvent) => {
+              if (e.key === 'Enter') confirmAddCategory()
+              if (e.key === 'Escape') cancelAddCategory()
+            }}
+          />
+        </div>
+      </div>
+    {/if}
+
     {#if categories.length === 0}
       <p class="text-xs text-surface-400 px-3 py-4 text-center">No categories yet</p>
     {/if}
@@ -142,13 +207,15 @@
       <ImportIcon class="size-4" />
       <span class="text-sm">Import Preset</span>
     </button>
-    <button
-      type="button"
-      class="btn hover:preset-tonal justify-start px-3 w-full gap-2"
-      onclick={onAddCategory}
-    >
-      <PlusIcon class="size-4" />
-      <span class="text-sm">New Category</span>
-    </button>
+    {#if !addingCategory}
+      <button
+        type="button"
+        class="btn hover:preset-tonal justify-start px-3 w-full gap-2"
+        onclick={() => addingCategory = true}
+      >
+        <PlusIcon class="size-4" />
+        <span class="text-sm">New Category</span>
+      </button>
+    {/if}
   </div>
 </aside>
