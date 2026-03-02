@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronRightIcon, PlusIcon, UserIcon, FolderIcon, ImportIcon, DownloadIcon, Trash2Icon } from '@lucide/svelte'
-  import type { Profile, Category, Preset, HookDisplayValue } from '../../../shared/types'
+  import type { Profile, Category, Preset, DisplayItem } from '../../../shared/types'
 
   interface Props {
     categories: Category[]
@@ -8,7 +8,7 @@
     presets: Preset[]
     activeProfileIds: Record<string, string>
     selectedProfileId: string | null
-    hookDisplayData: Record<string, Record<string, HookDisplayValue>>
+    hookDisplayData: Record<string, DisplayItem[]>
     onSelect: (id: string) => void
     onCreateNew: (categoryId?: string) => void
     onAddCategory: (name: string) => void
@@ -36,13 +36,13 @@
     return presets.find((p) => p.categoryName === category.name)
   }
 
-  /** Get the primary (first) display value for a profile, only if active. */
-  function primaryBadge(profileId: string, categoryId: string): HookDisplayValue | undefined {
+  /** Get the primary (first) display item for a profile, only if active. */
+  function primaryBadge(profileId: string, categoryId: string): DisplayItem | undefined {
     if (activeProfileIds[categoryId] !== profileId) return undefined
-    const data = hookDisplayData[profileId]
-    if (!data) return undefined
-    const entries = Object.values(data)
-    return entries.length > 0 ? entries[0] : undefined
+    const items = hookDisplayData[profileId]
+    if (!items || items.length === 0) return undefined
+    // Prefer first item with a status, otherwise first item
+    return items.find((i) => i.status) ?? items[0]
   }
 
   const STATUS_COLORS: Record<string, string> = {

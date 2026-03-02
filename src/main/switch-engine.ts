@@ -2,13 +2,11 @@ import { readFile, writeFile, rename, mkdir, copyFile, readdir } from 'fs/promis
 import { existsSync } from 'fs'
 import { dirname, join, basename } from 'path'
 import { homedir } from 'os'
-import { spawn } from 'child_process'
 import type {
   Profile,
   ConfigItem,
   FileReplaceItem,
   EnvVarItem,
-  RunCommandItem,
   ItemResult,
   SwitchResult
 } from './types'
@@ -23,13 +21,11 @@ interface BackupEntry {
   files: string[]
 }
 
-const DEFAULT_TIMEOUT = 30_000
-
 export class SwitchEngine {
   private isSwitching = false
 
   /**
-   * Switch to a profile: backup → file-replace → env-var → run-command → report
+   * Switch to a profile: backup → file-replace → env-var → report
    */
   async switch(profile: Profile): Promise<SwitchResult> {
     if (this.isSwitching) {
@@ -76,23 +72,6 @@ export class SwitchEngine {
     // Rollback file-replace and env-var if failed
     if (failed) {
       await this.restoreBackup(backupId)
-    }
-
-    // Phase 3: run-command (execute regardless of rollback status for items before failure,
-    // but only if no failure occurred in file-replace/env-var phases)
-    if (!failed) {
-      const cmdItems = enabledItems.filter(
-        (i): i is RunCommandItem => i.type === 'run-command'
-      )
-      for (const item of cmdItems) {
-        const result = await this.executeRunCommand(item)
-        results.push(result)
-        // run-command failures don't trigger rollback (side effects can't be undone)
-        if (!result.success) {
-          failed = true
-          break
-        }
-      }
     }
 
     return {
@@ -304,91 +283,6 @@ export class SwitchEngine {
         error: err instanceof Error ? err.message : String(err)
       }
     }
-  }
-
-  /**
-   * Execute a run-command item: spawn child process with timeout.
-   */
-  private async executeRunCommand(item: RunCommandItem): Promise<ItemResult> {
-    const timeout = item.timeout ?? DEFAULT_TIMEOUT
-    const workingDir = item.workingDir ? this.resolvePath(item.workingDir) : homedir()
-
-    return new Promise((resolve) => {
-      let stdout = ''
-      let stderr = ''
-      let killed = false
-
-      const child = spawn('sh', ['-c', item.command], {
-        cwd: workingDir,
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
-
-      const timer = setTimeout(() => {
-        killed = true
-        child.kill('SIGTERM')
-        // Force kill after 5s if SIGTERM doesn't work
-        setTimeout(() => {
-          if (!child.killed) {
-            child.kill('SIGKILL')
-          }
-        }, 5000)
-      }, timeout)
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString()
-      })
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString()
-      })
-
-      child.on('error', (err) => {
-        clearTimeout(timer)
-        resolve({
-          itemId: item.id,
-          type: 'run-command',
-          label: item.label,
-          success: false,
-          error: err.message,
-          stdout,
-          stderr
-        })
-      })
-
-      child.on('close', (code) => {
-        clearTimeout(timer)
-        if (killed) {
-          resolve({
-            itemId: item.id,
-            type: 'run-command',
-            label: item.label,
-            success: false,
-            error: `Command timed out after ${timeout}ms`,
-            stdout,
-            stderr
-          })
-        } else if (code !== 0) {
-          resolve({
-            itemId: item.id,
-            type: 'run-command',
-            label: item.label,
-            success: false,
-            error: `Command exited with code ${code}`,
-            stdout,
-            stderr
-          })
-        } else {
-          resolve({
-            itemId: item.id,
-            type: 'run-command',
-            label: item.label,
-            success: true,
-            stdout,
-            stderr
-          })
-        }
-      })
-    })
   }
 
   /**

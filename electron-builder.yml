@@ -15,6 +15,10 @@ extraResources:
     to: resources/presets
     filter:
       - "**/*.xoay-preset.json"
+  - from: resources/hooks
+    to: resources/hooks
+    filter:
+      - "**/*.js"
 asarUnpack:
   - resources/**
 win:

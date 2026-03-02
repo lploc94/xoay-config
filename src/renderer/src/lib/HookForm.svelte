@@ -20,6 +20,7 @@
   let enabled = $state(true)
   let cronIntervalSec = $state(60)
   let timeoutSec = $state(30)
+  let runInBackground = $state(false)
   let builtinHooks = $state<BuiltinHookInfo[]>([])
   let showBuiltin = $state(false)
 
@@ -32,6 +33,7 @@
       enabled = h?.enabled ?? true
       cronIntervalSec = h?.cronIntervalMs ? Math.round(h.cronIntervalMs / 1000) : 60
       timeoutSec = h?.timeout ? Math.round(h.timeout / 1000) : 30
+      runInBackground = h?.runInBackground ?? false
       showBuiltin = false
       loadBuiltinHooks()
     }
@@ -72,11 +74,13 @@
     }
     if (hookType === 'cron') {
       result.cronIntervalMs = Math.max(cronIntervalSec * 1000, 10000)
+      result.runInBackground = runInBackground
     }
     onSave(result)
   }
 
   const isEditing = $derived(!!hook)
+  const isBuiltIn = $derived(isEditing && hook?.builtIn === true)
   const title = $derived(isEditing ? 'Edit Hook' : 'Add Hook')
 
   const animation =
@@ -90,7 +94,12 @@
     <Dialog.Positioner class="fixed inset-0 z-50 flex justify-center items-center p-4">
       <Dialog.Content class="card bg-surface-100-900 w-full max-w-lg p-5 space-y-4 shadow-xl {animation}">
         <header class="flex justify-between items-center">
-          <Dialog.Title class="text-lg font-bold">{title}</Dialog.Title>
+          <div class="flex items-center gap-2">
+            <Dialog.Title class="text-lg font-bold">{title}</Dialog.Title>
+            {#if isBuiltIn}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-300/50 text-surface-500 dark:bg-surface-700/50 dark:text-surface-400" title="This is a built-in hook that ships with the app">Built-in</span>
+            {/if}
+          </div>
           <button type="button" class="btn-icon hover:preset-tonal" onclick={onCancel}>
             <XIcon class="size-4" />
           </button>
@@ -150,6 +159,12 @@
               <input id="hook-interval" class="input" type="number" bind:value={cronIntervalSec} min="10" required />
               <p class="text-xs text-surface-400 mt-1">Minimum 10 seconds</p>
             </div>
+
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" class="checkbox" bind:checked={runInBackground} />
+              <span class="text-sm">Run in background</span>
+            </label>
+            <p class="text-xs text-surface-400 -mt-2 ml-7">Runs for all profiles regardless of active status</p>
           {/if}
 
           <!-- Timeout -->

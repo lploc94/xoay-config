@@ -5,9 +5,8 @@ import type {
   ConfigItem,
   Preset,
   SwitchResult,
-  SyncResult,
   ProfileHook,
-  HookDisplayValue,
+  DisplayItem,
   BuiltinHookInfo,
   IpcResponse
 } from '../../../shared/types'
@@ -64,10 +63,6 @@ export const autoDetectPresets = () => invoke<string[]>(IPC_CHANNELS.IMPORT_AUTO
 export const importPreview = (presetId?: string) =>
   invoke<ConfigItem[]>(IPC_CHANNELS.IMPORT_PREVIEW, { presetId })
 
-// ── Sync ────────────────────────────────────────────────────
-export const syncProfile = (profileId: string) =>
-  invoke<{ results: SyncResult[] }>(IPC_CHANNELS.SYNC_PROFILE, { profileId })
-
 // ── Hooks ──────────────────────────────────────────────────
 export const addHook = (profileId: string, hook: ProfileHook) =>
   invoke<Profile>(IPC_CHANNELS.HOOK_ADD, { profileId, hook })
@@ -78,7 +73,7 @@ export const deleteHook = (profileId: string, hookId: string) =>
 export const selectHookFile = () =>
   invoke<string | null>(IPC_CHANNELS.HOOK_SELECT_FILE)
 export const getHookDisplayData = () =>
-  invoke<Record<string, Record<string, HookDisplayValue>>>(IPC_CHANNELS.HOOK_GET_DISPLAY_DATA)
+  invoke<Record<string, DisplayItem[]>>(IPC_CHANNELS.HOOK_GET_DISPLAY_DATA)
 export const listBuiltinHooks = () =>
   invoke<BuiltinHookInfo[]>(IPC_CHANNELS.HOOK_LIST_BUILTIN)
 export const getHookDisplayTimestamps = () =>
@@ -95,8 +90,8 @@ export function onProfileSwitched(callback: (result: SwitchResult) => void): () 
   }
 }
 
-export function onHookDisplayUpdate(callback: (data: { profileId: string; displayData: Record<string, HookDisplayValue>; updatedAt: number }) => void): () => void {
-  const handler = (_event: unknown, data: { profileId: string; displayData: Record<string, HookDisplayValue>; updatedAt: number }): void => {
+export function onHookDisplayUpdate(callback: (data: { profileId: string; displayData: DisplayItem[]; updatedAt: number }) => void): () => void {
+  const handler = (_event: unknown, data: { profileId: string; displayData: DisplayItem[]; updatedAt: number }): void => {
     callback(data)
   }
   window.electron.ipcRenderer.on('hook:display-update', handler)

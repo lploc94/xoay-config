@@ -5,8 +5,8 @@ import icon from '../../resources/icon.png?asset'
 import { registerSwitchHandlers } from './switch-handlers'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
-import { startCronHooks, stopCronHooks } from './cron-scheduler'
-import { getAllActiveProfileIds } from './storage'
+import { startCronHooks, stopCronHooks, startBackgroundCrons, stopAllBackgroundCrons } from './cron-scheduler'
+import { getAllActiveProfileIds, listProfiles } from './storage'
 import { ensureHookDirs, provisionBuiltinHooks } from './hook-storage'
 import { runMigrations } from './migration'
 
@@ -83,6 +83,12 @@ app.whenReady().then(() => {
     }
   }
 
+  // Start background cron hooks for ALL profiles (regardless of active state)
+  const allProfiles = listProfiles()
+  for (const profile of allProfiles) {
+    startBackgroundCrons(profile.id)
+  }
+
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
@@ -102,4 +108,5 @@ app.on('window-all-closed', () => {
 // Stop cron hooks before app quits
 app.on('before-quit', () => {
   stopCronHooks()
+  stopAllBackgroundCrons()
 })

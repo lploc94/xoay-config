@@ -1,6 +1,5 @@
-import { getProfile, getActiveProfileId, setActiveProfileId, listProfiles } from './storage'
+import { getProfile, getActiveProfileId, setActiveProfileId, listProfiles, applyConfigUpdates } from './storage'
 import { switchEngine } from './switch-engine'
-import { syncProfile } from './anchor-sync'
 import { executeHook, mergeDisplayData, processHookActions, setAutoSwitchHandler, setIsSwitching } from './hook-executor'
 import { startCronHooks, stopCronHooks } from './cron-scheduler'
 import { buildTrayMenu } from './tray'
@@ -82,14 +81,13 @@ async function runHooks(
  * Flow:
  * 1. Stop cron hooks for OLD profile
  * 2. Run pre-switch-out hooks on OLD profile
- * 3. Sync active profile (best-effort)
- * 4. Run post-switch-out hooks on OLD profile
- * 5. switchEngine.switch(newProfile) — files replaced here
- * 6. Run pre-switch-in hooks on NEW profile
- * 7. Update activeProfileId (per-category)
- * 8. Run post-switch-in hooks on NEW profile
- * 9. Start cron hooks for NEW profile
- * 10. Return SwitchResult with hookResults
+ * 3. Run post-switch-out hooks on OLD profile
+ * 4. switchEngine.switch(newProfile) — files replaced here
+ * 5. Run pre-switch-in hooks on NEW profile
+ * 6. Update activeProfileId (per-category)
+ * 7. Run post-switch-in hooks on NEW profile
+ * 8. Start cron hooks for NEW profile
+ * 9. Return SwitchResult with hookResults
  */
 export async function orchestrateSwitch(profileId: string): Promise<SwitchResult> {
   const profile = getProfile(profileId)
@@ -114,14 +112,14 @@ export async function orchestrateSwitch(profileId: string): Promise<SwitchResult
       const preOutResults = await runHooks(oldProfile.hooks, 'pre-switch-out', oldProfile)
       allHookResults.push(...preOutResults)
 
-      // Step 3: Sync active profile (best-effort)
-      try {
-        await syncProfile(oldProfileId!)
-      } catch (err) {
-        console.error('Sync before switch failed (continuing):', err)
+      // Step 2.5: Apply configUpdates from pre-switch-out hooks (if any)
+      for (const result of preOutResults) {
+        if (result.configUpdates && result.configUpdates.length > 0) {
+          applyConfigUpdates(oldProfile.id, result.configUpdates)
+        }
       }
 
-      // Step 4: post-switch-out hooks on OLD profile
+      // Step 3: post-switch-out hooks on OLD profile
       const postOutResults = await runHooks(oldProfile.hooks, 'post-switch-out', oldProfile)
       allHookResults.push(...postOutResults)
     }

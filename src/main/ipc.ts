@@ -1,6 +1,6 @@
 import { ipcMain, dialog } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
-import type { IpcResponse, Profile, Category, CreateProfileReq, ConfigItem, Preset, SyncResult, ProfileHook, DisplayItem, BuiltinHookInfo } from '../shared/types'
+import type { IpcResponse, Profile, Category, CreateProfileReq, ConfigItem, Preset, ProfileHook, DisplayItem, BuiltinHookInfo } from '../shared/types'
 import {
   listProfiles,
   getProfile,
@@ -18,7 +18,6 @@ import {
 import { getAllPresets, getPresetById } from './presets'
 import { importPresetFile, exportPreset } from './preset-loader'
 import { importCurrentConfig, autoDetectPresets } from './import-service'
-import { syncProfile } from './anchor-sync'
 import { getHooksDir, listBuiltinHooks, toRelativeHookPath } from './hook-storage'
 
 function ok<T>(data: T): IpcResponse<T> {
@@ -260,20 +259,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // ── Sync ────────────────────────────────────────────────────────
-
-  ipcMain.handle(
-    IPC_CHANNELS.SYNC_PROFILE,
-    async (_, { profileId }: { profileId: string }): Promise<IpcResponse<{ results: SyncResult[] }>> => {
-      try {
-        const results = await syncProfile(profileId)
-        return ok({ results })
-      } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e))
-      }
-    }
-  )
-
   // ── Hooks ──────────────────────────────────────────────────────
 
   ipcMain.handle(
@@ -312,6 +297,11 @@ export function registerIpcHandlers(): void {
       try {
         const profile = getProfile(profileId)
         if (!profile) return fail(`Profile not found: ${profileId}`)
+        const hook = profile.hooks.find((h) => h.id === hookId)
+        if (hook?.builtIn) {
+          console.warn(`[ipc] Attempted to delete built-in hook: ${hookId}`)
+          return fail('Cannot delete a built-in hook')
+        }
         profile.hooks = profile.hooks.filter((h) => h.id !== hookId)
         return ok(updateProfile(profile))
       } catch (e) {

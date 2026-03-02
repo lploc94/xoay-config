@@ -56,7 +56,6 @@ const IPC_CHANNELS = {
   CONFIG_IMPORT_CURRENT: 'config:import-current',
   IMPORT_AUTO_DETECT:  'import:auto-detect',
   IMPORT_PREVIEW:      'import:preview',
-  SYNC_PROFILE:        'sync:profile',
   HOOK_ADD:            'hook:add',
   HOOK_UPDATE:         'hook:update',
   HOOK_DELETE:         'hook:delete',
@@ -217,8 +216,8 @@ Switch to a profile — executes all enabled config items.
     label?: string
     success: boolean
     error?: string
-    stdout?: string   // For run-command items
-    stderr?: string   // For run-command items
+    stdout?: string
+    stderr?: string
   }
 
   interface HookResult {
@@ -228,8 +227,25 @@ Switch to a profile — executes all enabled config items.
     error?: string
     stdout?: string
     stderr?: string
-    display?: Record<string, HookDisplayValue>
+    display?: DisplayItem[]  // parsed from stdout if valid JSON
     actions?: HookActions
+    configUpdates?: ConfigUpdate[]  // parsed from stdout if valid JSON
+  }
+
+  interface ConfigUpdate {
+    itemId: string
+    content?: string  // for file-replace items
+    value?: string    // for env-var items
+  }
+
+  interface DisplayItem {
+    type: 'text' | 'number' | 'percentage' | 'status' | 'key-value' | 'html'
+    label: string
+    value: string | number | null
+    max?: number              // percentage: max value (default 100)
+    status?: 'ok' | 'warning' | 'error'
+    entries?: Record<string, string>  // key-value type
+    span?: 1 | 2 | 3 | 'full'
   }
   ```
 - **Handler:** `src/main/switch-handlers.ts`
@@ -264,25 +280,6 @@ Preview what config items would be imported from disk.
 
 ---
 
-### `sync:profile`
-
-Manually sync a profile's anchored items with disk content. Reads files from disk and updates stored item values when the anchor matches and content has changed.
-
-- **Request:** `{ profileId: string }`
-- **Response:** `IpcResponse<{ results: SyncResult[] }>`
-  ```ts
-  interface SyncResult {
-    itemId: string
-    synced: boolean
-    reason?: 'anchor-mismatch' | 'no-change' | 'file-not-found' | 'error'
-    error?: string
-  }
-  ```
-- **Handler:** `src/main/ipc.ts` → delegates to `anchor-sync.ts`
-- **Notes:** Only processes `file-replace` and `env-var` items that have an `anchor` configured. Items without anchors are skipped. When `synced: true`, the stored content/value has been updated from disk. When `synced: false`, `reason` explains why (anchor didn't match, file unchanged, etc.).
-
----
-
 ### `hook:add`
 
 Add a hook to a profile.
@@ -294,9 +291,11 @@ Add a hook to a profile.
     label: string
     enabled: boolean
     type: 'pre-switch-in' | 'post-switch-in' | 'pre-switch-out' | 'post-switch-out' | 'cron'
-    scriptPath: string       // "builtin/x.js", "x.js" (user hook), or absolute path
+    scriptPath: string       // "builtin/x.js" (built-in), "x.js" (user hook), or absolute path
     cronIntervalMs?: number  // cron only, default 60000, minimum 10000
     timeout?: number         // ms, default 30000
+    runInBackground?: boolean // cron only: true = runs for all profiles on app startup
+    builtIn?: boolean        // true for hooks auto-attached by the app; can be disabled but not deleted
   }
   ```
 - **Response:** `IpcResponse<Profile>` (the updated profile)
@@ -319,7 +318,7 @@ Delete a hook from a profile.
 - **Request:** `{ profileId: string, hookId: string }`
 - **Response:** `IpcResponse<Profile>` (the updated profile)
 - **Handler:** `src/main/ipc.ts`
-- **Notes:** Removes the hook with the matching ID from the profile's `hooks` array.
+- **Notes:** Removes the hook with the matching ID from the profile's `hooks` array. Built-in hooks (`builtIn: true`) should not be deleted — the UI hides the delete button for them. They can be disabled instead.
 
 ### `hook:select-file`
 
@@ -335,17 +334,21 @@ Open a native file picker dialog to select a hook script.
 Get all persisted hook display data for all profiles.
 
 - **Request:** no arguments
-- **Response:** `IpcResponse<Record<string, Record<string, HookDisplayValue>>>`
+- **Response:** `IpcResponse<Record<string, DisplayItem[]>>`
   ```ts
-  // Outer key: profileId, inner key: display field name
-  interface HookDisplayValue {
-    value: string | null
-    label?: string
+  // Outer key: profileId, value: array of display items
+  interface DisplayItem {
+    type: 'text' | 'number' | 'percentage' | 'status' | 'key-value' | 'html'
+    label: string
+    value: string | number | null
+    max?: number
     status?: 'ok' | 'warning' | 'error'
+    entries?: Record<string, string>
+    span?: 1 | 2 | 3 | 'full'
   }
   ```
 - **Handler:** `src/main/ipc.ts`
-- **Notes:** Reads from `electron-store` key `hookDisplayData`. Returns an empty object if no data exists.
+- **Notes:** Reads from `electron-store` key `hookDisplayData`. Returns an empty object if no data exists. The app auto-converts old `Record<string, HookDisplayValue>` format to `DisplayItem[]` at runtime, so this endpoint always returns the new format.
 
 ### `hook:list-builtin`
 
@@ -413,8 +416,8 @@ Sent when a hook produces new display data and it has been merged into the store
   ```ts
   {
     profileId: string
-    displayData: Record<string, HookDisplayValue>  // merged display data for this profile
-    updatedAt: number                               // epoch ms timestamp
+    displayData: DisplayItem[]  // full display data for this profile
+    updatedAt: number           // epoch ms timestamp
   }
   ```
 - **Source:** `src/main/hook-executor.ts` — `mergeDisplayData()`

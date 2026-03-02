@@ -1,5 +1,9 @@
+import * as fs from 'fs'
+import * as path from 'path'
+import { randomUUID } from 'crypto'
 import { store, listProfiles, listCategories } from './storage'
-import type { Category, Profile } from '../shared/types'
+import { getHooksDir } from './hook-storage'
+import type { Category, Profile, ProfileHook } from '../shared/types'
 
 const BUILT_IN_CATEGORIES: Omit<Category, 'createdAt' | 'updatedAt'>[] = [
   { id: 'cat-claude-code', name: 'Claude Code', builtIn: true },
@@ -15,12 +19,19 @@ const UNCATEGORIZED_CATEGORY: Omit<Category, 'createdAt' | 'updatedAt'> = {
 export function runMigrations(): void {
   try {
     const version = store.get('schemaVersion')
-    if (version >= 2) return
+    if (version >= 3) return
 
-    migrateV1toV2()
+    if (version < 2) {
+      migrateV1toV2()
+      store.set('schemaVersion', 2)
+      console.log('[migration] Schema migrated to version 2')
+    }
 
-    store.set('schemaVersion', 2)
-    console.log('[migration] Schema migrated to version 2')
+    if (version < 3) {
+      migrateV2toV3()
+      store.set('schemaVersion', 3)
+      console.log('[migration] Schema migrated to version 3')
+    }
   } catch (err) {
     console.error('[migration] Migration failed — will retry next launch:', err)
   }
@@ -92,4 +103,66 @@ function migrateV1toV2(): void {
   }
   // If oldActiveProfileId is null/undefined → activeProfileIds stays as {} (default)
   // DO NOT delete old activeProfileId field — keep for rollback safety
+}
+
+/** Migrate run-command items to hooks, strip anchor fields from config items. */
+function migrateV2toV3(): void {
+  const hooksDir = getHooksDir()
+  fs.mkdirSync(hooksDir, { recursive: true })
+
+  const profiles = store.get('profiles') as any[]
+  const updatedProfiles: Profile[] = profiles.map((p) => {
+    const hooks: ProfileHook[] = Array.isArray(p.hooks) ? [...p.hooks] : []
+
+    // Convert run-command items to post-switch-in hooks
+    const items = Array.isArray(p.items) ? p.items : []
+    for (const item of items) {
+      if (item.type !== 'run-command') continue
+
+      const command: string = item.command ?? ''
+      const workingDir: string = item.workingDir ?? ''
+      const timeout: number = item.timeout ?? 30000
+
+      // Generate a JS script that runs the command
+      const scriptName = `migrated-${randomUUID()}.js`
+      const scriptPath = path.join(hooksDir, scriptName)
+      const lines = [
+        `// Auto-migrated from run-command item: ${item.label ?? ''}`,
+        `const { execSync } = require('child_process');`,
+        `try {`,
+        `  execSync(${JSON.stringify(command)}, {`,
+        `    stdio: 'inherit',`,
+        workingDir ? `    cwd: ${JSON.stringify(workingDir)},` : '',
+        `    timeout: ${timeout}`,
+        `  });`,
+        `} catch (e) {`,
+        `  console.error('Migration hook failed:', e.message);`,
+        `  process.exit(1);`,
+        `}`
+      ].filter(Boolean).join('\n')
+
+      fs.writeFileSync(scriptPath, lines, 'utf-8')
+
+      hooks.push({
+        id: randomUUID(),
+        label: item.label ?? 'Migrated Command',
+        enabled: item.enabled ?? true,
+        type: 'post-switch-in',
+        scriptPath: scriptName,
+        timeout
+      })
+    }
+
+    // Strip anchor field and keep only file-replace and env-var items
+    const cleanedItems = items
+      .filter((item: any) => item.type === 'file-replace' || item.type === 'env-var')
+      .map((item: any) => {
+        const { anchor, ...rest } = item
+        return rest
+      })
+
+    return { ...p, items: cleanedItems, hooks }
+  })
+
+  store.set('profiles', updatedProfiles)
 }

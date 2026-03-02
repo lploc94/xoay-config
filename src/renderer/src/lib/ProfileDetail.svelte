@@ -1,11 +1,11 @@
 <script lang="ts">
   import {
     PlayIcon, TrashIcon, PencilIcon, PlusIcon, DownloadIcon,
-    FileIcon, VariableIcon, TerminalIcon,
-    CheckIcon, XIcon, RefreshCwIcon, AnchorIcon,
+    FileIcon, VariableIcon,
+    CheckIcon, XIcon,
     ZapIcon, ClockIcon
   } from '@lucide/svelte'
-  import type { Profile, ConfigItem, ProfileHook, SyncResult, DisplayItem } from '../../../shared/types'
+  import type { Profile, ConfigItem, ProfileHook, DisplayItem } from '../../../shared/types'
   import DOMPurify from 'dompurify'
 
   interface Props {
@@ -22,7 +22,6 @@
     onToggleItem: (itemId: string) => void
     onImportCurrent: () => void
     onRenameProfile: (name: string) => void
-    onSync: () => Promise<SyncResult[]>
     onAddHook: () => void
     onEditHook: (hook: ProfileHook) => void
     onDeleteHook: (hookId: string) => void
@@ -34,7 +33,7 @@
     profile, isActive, hookDisplayData, lastHookRunAt, hookNotification,
     onSwitch, onDelete, onAddItem,
     onEditItem, onDeleteItem, onToggleItem, onImportCurrent,
-    onRenameProfile, onSync,
+    onRenameProfile,
     onAddHook, onEditHook, onDeleteHook, onToggleHook,
     onDismissHookNotification
   }: Props = $props()
@@ -56,28 +55,24 @@
 
   function typeIcon(type: ConfigItem['type']) {
     if (type === 'file-replace') return FileIcon
-    if (type === 'env-var') return VariableIcon
-    return TerminalIcon
+    return VariableIcon
   }
 
   function typeLabel(type: ConfigItem['type']): string {
     if (type === 'file-replace') return 'File Replace'
-    if (type === 'env-var') return 'Env Variable'
-    return 'Run Command'
+    return 'Env Variable'
   }
 
   function itemSummary(item: ConfigItem): string {
     if (item.type === 'file-replace') return item.targetPath
-    if (item.type === 'env-var') return `${item.name} = ${item.value ? item.value.substring(0, 20) + (item.value.length > 20 ? '...' : '') : '(empty)'}`
-    return item.command
+    return `${item.name} = ${item.value ? item.value.substring(0, 20) + (item.value.length > 20 ? '...' : '') : '(empty)'}`
   }
 
   // Group items by type
   const groupedItems = $derived.by(() => {
     const groups: Record<ConfigItem['type'], ConfigItem[]> = {
       'file-replace': [],
-      'env-var': [],
-      'run-command': []
+      'env-var': []
     }
     for (const item of profile.items) {
       groups[item.type].push(item)
@@ -86,36 +81,6 @@
   })
 
   const switching = $state({ loading: false })
-
-  let syncing = $state(false)
-  let syncResults = $state<SyncResult[] | null>(null)
-  let syncError = $state<string | null>(null)
-
-  async function handleSync(): Promise<void> {
-    syncing = true
-    syncResults = null
-    syncError = null
-    try {
-      syncResults = await onSync()
-    } catch (e) {
-      syncError = e instanceof Error ? e.message : String(e)
-    } finally {
-      syncing = false
-    }
-  }
-
-  function syncResultMessage(r: SyncResult): string {
-    if (r.synced) return 'Synced'
-    if (r.reason === 'anchor-mismatch') return 'Skipped: different account'
-    if (r.reason === 'no-change') return 'No change'
-    if (r.reason === 'file-not-found') return 'File not found'
-    if (r.reason === 'error') return r.error ?? 'Error'
-    return 'Skipped'
-  }
-
-  function hasAnchor(item: ConfigItem): boolean {
-    return item.type !== 'run-command' && !!item.anchor
-  }
 
   // Hook helpers
   function hookTypeLabel(type: ProfileHook['type']): string {
@@ -141,6 +106,10 @@
     }
     return groups
   })
+
+  function isBuiltinHook(hook: ProfileHook): boolean {
+    return hook.builtIn === true
+  }
 
   function displayStatusColor(status?: 'ok' | 'warning' | 'error'): string {
     if (status === 'warning') return 'text-warning-400'
@@ -218,9 +187,6 @@
       <button type="button" class="btn btn-sm preset-filled-primary-500" onclick={onSwitch} title="Switch to this profile">
         <PlayIcon class="size-4" /> Switch
       </button>
-      <button type="button" class="btn btn-sm preset-tonal" onclick={handleSync} disabled={syncing} title="Sync from disk">
-        <RefreshCwIcon class="size-4 {syncing ? 'animate-spin' : ''}" /> Sync
-      </button>
       <button type="button" class="btn btn-sm preset-tonal" onclick={onImportCurrent} title="Import current config">
         <DownloadIcon class="size-4" /> Import
       </button>
@@ -289,47 +255,7 @@
       </div>
     {/if}
 
-    <!-- Sync Results Banner -->
-    {#if syncResults}
-      {@const syncedCount = syncResults.filter(r => r.synced).length}
-      <div class="rounded p-3 space-y-2 {syncedCount > 0 ? 'bg-success-500/10 border border-success-500/30' : 'bg-surface-200-800'}">
-        <div class="flex items-center justify-between">
-          <span class="text-sm font-medium">
-            {#if syncedCount > 0}
-              {syncedCount} item{syncedCount > 1 ? 's' : ''} synced
-            {:else}
-              No items synced
-            {/if}
-          </span>
-          <button type="button" class="btn-icon btn-icon-sm hover:preset-tonal" onclick={() => syncResults = null} title="Dismiss">
-            <XIcon class="size-3" />
-          </button>
-        </div>
-        {#each syncResults as r}
-          {@const item = profile.items.find(i => i.id === r.itemId)}
-          <div class="flex items-center gap-2 text-xs">
-            {#if r.synced}
-              <CheckIcon class="size-3 text-success-500 shrink-0" />
-            {:else}
-              <XIcon class="size-3 text-surface-400 shrink-0" />
-            {/if}
-            <span class="truncate">{item?.label ?? r.itemId}</span>
-            <span class="text-surface-400 ml-auto shrink-0">{syncResultMessage(r)}</span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    {#if syncError}
-      <div class="rounded p-3 bg-error-500/10 border border-error-500/30 flex items-center justify-between">
-        <span class="text-sm text-error-400">{syncError}</span>
-        <button type="button" class="btn-icon btn-icon-sm hover:preset-tonal" onclick={() => syncError = null} title="Dismiss">
-          <XIcon class="size-3" />
-        </button>
-      </div>
-    {/if}
-
-    {#each (['file-replace', 'env-var', 'run-command'] as const) as type}
+    {#each (['file-replace', 'env-var'] as const) as type}
       {@const items = groupedItems[type]}
       {#if items.length > 0}
         {@const Icon = typeIcon(type)}
@@ -345,9 +271,6 @@
                 <span class="flex-1 min-w-0">
                   <p class="text-sm font-medium truncate">
                     {item.label}
-                    {#if hasAnchor(item)}
-                      <AnchorIcon class="size-3 inline-block ml-1 text-surface-400" title="Has anchor" />
-                    {/if}
                   </p>
                   <p class="text-xs text-surface-400 truncate">{itemSummary(item)}</p>
                 </span>
@@ -420,7 +343,12 @@
               {#each hooks as hook (hook.id)}
                 <div class="flex items-center gap-2 px-3 py-2 rounded bg-surface-200-800 group {!hook.enabled ? 'opacity-50' : ''}">
                   <span class="flex-1 min-w-0">
-                    <p class="text-sm font-medium truncate">{hook.label}</p>
+                    <p class="text-sm font-medium truncate">
+                      {hook.label}
+                      {#if isBuiltinHook(hook)}
+                        <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-300/50 text-surface-500 dark:bg-surface-700/50 dark:text-surface-400" title="This is a built-in hook that ships with the app">Built-in</span>
+                      {/if}
+                    </p>
                     <p class="text-xs text-surface-400 truncate">{hook.scriptPath}</p>
                   </span>
                   <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -434,9 +362,11 @@
                     <button type="button" class="btn-icon btn-icon-sm hover:preset-tonal" onclick={() => onEditHook(hook)} title="Edit">
                       <PencilIcon class="size-3" />
                     </button>
-                    <button type="button" class="btn-icon btn-icon-sm hover:preset-tonal text-error-500" onclick={() => onDeleteHook(hook.id)} title="Delete">
-                      <TrashIcon class="size-3" />
-                    </button>
+                    {#if !isBuiltinHook(hook)}
+                      <button type="button" class="btn-icon btn-icon-sm hover:preset-tonal text-error-500" onclick={() => onDeleteHook(hook.id)} title="Delete">
+                        <TrashIcon class="size-3" />
+                      </button>
+                    {/if}
                   </div>
                 </div>
               {/each}

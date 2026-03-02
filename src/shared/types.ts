@@ -1,25 +1,3 @@
-// ── Anchor Types ─────────────────────────────────────────────────
-
-export interface JsonPathAnchor {
-  type: 'json-path'
-  path: string
-  value: string
-}
-
-export interface EnvValueAnchor {
-  type: 'env-value'
-  name: string
-  value: string
-}
-
-export interface LineContentAnchor {
-  type: 'line-content'
-  line: number
-  value: string
-}
-
-export type AnchorConfig = JsonPathAnchor | EnvValueAnchor | LineContentAnchor
-
 // ── Config Item Types ─────────────────────────────────────────────
 
 export interface BaseConfigItem {
@@ -32,7 +10,6 @@ export interface FileReplaceItem extends BaseConfigItem {
   type: 'file-replace'
   targetPath: string
   content: string
-  anchor?: AnchorConfig
 }
 
 export interface EnvVarItem extends BaseConfigItem {
@@ -40,17 +17,9 @@ export interface EnvVarItem extends BaseConfigItem {
   name: string
   value: string
   shellFile: string
-  anchor?: AnchorConfig
 }
 
-export interface RunCommandItem extends BaseConfigItem {
-  type: 'run-command'
-  command: string
-  workingDir?: string
-  timeout?: number // ms, default 30000
-}
-
-export type ConfigItem = FileReplaceItem | EnvVarItem | RunCommandItem
+export type ConfigItem = FileReplaceItem | EnvVarItem
 
 // ── Hook Types ──────────────────────────────────────────────────
 
@@ -62,6 +31,8 @@ export interface ProfileHook {
   scriptPath: string // path to .js file: "builtin/x.js" (built-in), "x.js" (user hook in <userData>/hooks/), or absolute path
   cronIntervalMs?: number // only for type 'cron', default 60000 (1 min), minimum 10000 (10s)
   timeout?: number // ms, default 30000
+  runInBackground?: boolean // only for type 'cron': true = runs for all profiles regardless of active state
+  builtIn?: boolean // true for hooks auto-attached by the app; can be disabled but not deleted
 }
 
 export interface HookDisplayValue {
@@ -76,9 +47,26 @@ export interface HookActions {
   notify?: string // show inline notification with custom message
 }
 
+export interface DisplayItem {
+  type: 'text' | 'number' | 'percentage' | 'status' | 'key-value' | 'html'
+  label: string
+  value: string | number | null
+  max?: number              // percentage: max value (default 100)
+  status?: 'ok' | 'warning' | 'error'
+  entries?: Record<string, string>  // key-value type
+  span?: 1 | 2 | 3 | 'full'
+}
+
+export interface ConfigUpdate {
+  itemId: string
+  content?: string  // for file-replace items
+  value?: string    // for env-var items
+}
+
 export interface HookOutput {
-  display?: Record<string, HookDisplayValue>
+  display?: DisplayItem[]
   actions?: HookActions
+  configUpdates?: ConfigUpdate[]
 }
 
 export interface HookContext {
@@ -95,8 +83,9 @@ export interface HookResult {
   error?: string
   stdout?: string
   stderr?: string
-  display?: Record<string, HookDisplayValue> // parsed from stdout if valid JSON
+  display?: DisplayItem[] // parsed from stdout if valid JSON
   actions?: HookActions // parsed from stdout if valid JSON
+  configUpdates?: ConfigUpdate[] // parsed from stdout if valid JSON
 }
 
 // ── Built-in Hook Info ──────────────────────────────────────────
@@ -145,16 +134,13 @@ export interface Preset {
 // ── Preset File Format (.xoay-preset.json) ───────────────────────
 
 export interface PresetDefaultItem {
-  type: 'file-replace' | 'env-var' | 'run-command'
+  type: 'file-replace' | 'env-var'
   label: string
   enabled: boolean
   targetPath?: string   // file-replace
   name?: string         // env-var
   value?: string        // env-var
   shellFile?: string    // env-var
-  command?: string      // run-command
-  workingDir?: string   // run-command
-  timeout?: number      // run-command
 }
 
 export interface PresetHookDef {
@@ -196,15 +182,6 @@ export interface SwitchResult {
   success: boolean
 }
 
-// ── Sync Types ──────────────────────────────────────────────────
-
-export interface SyncResult {
-  itemId: string
-  synced: boolean
-  reason?: 'anchor-mismatch' | 'no-change' | 'file-not-found' | 'error'
-  error?: string
-}
-
 // ── App State (electron-store schema) ────────────────────────────
 
 export interface AppState {
@@ -212,7 +189,7 @@ export interface AppState {
   categories: Category[]
   profiles: Profile[]
   activeProfileIds: Record<string, string> // categoryId → profileId
-  hookDisplayData: Record<string, Record<string, HookDisplayValue>>
+  hookDisplayData: Record<string, DisplayItem[]>
   hookDisplayTimestamps: Record<string, number> // profileId → last hook-run epoch ms
 }
 
@@ -248,7 +225,6 @@ export const IPC_CHANNELS = {
   CONFIG_IMPORT_CURRENT: 'config:import-current',
   IMPORT_AUTO_DETECT: 'import:auto-detect',
   IMPORT_PREVIEW: 'import:preview',
-  SYNC_PROFILE: 'sync:profile',
   HOOK_ADD: 'hook:add',
   HOOK_UPDATE: 'hook:update',
   HOOK_DELETE: 'hook:delete',

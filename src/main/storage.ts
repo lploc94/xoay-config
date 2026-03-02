@@ -1,13 +1,13 @@
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
-import type { AppState, Profile, Category, ConfigItem, CreateProfileReq, DisplayItem } from '../shared/types'
-import { getPresetById } from './preset-loader'
+import type { AppState, Profile, Category, ConfigItem, CreateProfileReq, DisplayItem, ConfigUpdate } from '../shared/types'
+import { getPresetById, getBuiltInHooks } from './preset-loader'
 import { stopCronHooks, stopBackgroundCrons } from './cron-scheduler'
 
 const store = new Store<AppState>({
   name: 'xoay-config',
   defaults: {
-    schemaVersion: 2,
+    schemaVersion: 3,
     categories: [],
     profiles: [],
     activeProfileIds: {},
@@ -59,6 +59,7 @@ function migrateStore(): void {
     migrateHookDisplayData()
     store.set('schemaVersion', 2)
   }
+  // v2→v3 migration is handled by runMigrations() in migration.ts
 }
 
 migrateStore()
@@ -117,7 +118,7 @@ export function createProfile(req: CreateProfileReq): Profile {
     categoryId: req.categoryId,
     presetId: req.presetId,
     items,
-    hooks: [],
+    hooks: getBuiltInHooks(),
     createdAt: now,
     updatedAt: now
   }
@@ -268,6 +269,50 @@ export function getHookDisplayData(): Record<string, DisplayItem[]> {
   }
 
   return result
+}
+
+// ── Config Updates (from hooks) ──────────────────────────────────
+
+/**
+ * Apply config updates from hook output to a profile's items.
+ * Each update targets a specific item by ID and updates content/value.
+ */
+export function applyConfigUpdates(profileId: string, updates: ConfigUpdate[]): void {
+  const profile = getProfile(profileId)
+  if (!profile) {
+    console.warn(`[applyConfigUpdates] Profile not found: ${profileId}`)
+    return
+  }
+
+  let changed = false
+
+  for (const update of updates) {
+    const item = profile.items.find((i) => i.id === update.itemId)
+    if (!item) {
+      console.warn(`[applyConfigUpdates] Item not found: ${update.itemId} in profile ${profileId}`)
+      continue
+    }
+
+    if (item.type === 'file-replace') {
+      if (update.content !== undefined) {
+        item.content = update.content
+        changed = true
+      } else if (update.value !== undefined) {
+        console.warn(`[applyConfigUpdates] Item ${update.itemId} is file-replace but only 'value' was provided — skipping`)
+      }
+    } else if (item.type === 'env-var') {
+      if (update.value !== undefined) {
+        item.value = update.value
+        changed = true
+      } else if (update.content !== undefined) {
+        console.warn(`[applyConfigUpdates] Item ${update.itemId} is env-var but only 'content' was provided — skipping`)
+      }
+    }
+  }
+
+  if (changed) {
+    updateProfile(profile)
+  }
 }
 
 // ── Backups ──────────────────────────────────────────────────────

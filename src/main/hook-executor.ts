@@ -11,7 +11,8 @@ import type {
   HookResult,
   HookDisplayValue,
   HookActions,
-  DisplayItem
+  DisplayItem,
+  ConfigUpdate
 } from '../shared/types'
 
 const DEFAULT_TIMEOUT = 30_000
@@ -163,8 +164,9 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
 
       let display: DisplayItem[] | undefined
       let actions: HookActions | undefined
+      let configUpdates: ConfigUpdate[] | undefined
 
-      // Attempt to parse stdout as JSON for display/actions
+      // Attempt to parse stdout as JSON for display/actions/configUpdates
       if (stdout.trim()) {
         try {
           const parsed = JSON.parse(stdout.trim())
@@ -173,6 +175,7 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
               display = normalizeDisplay(parsed.display)
             }
             if (parsed.actions) actions = parsed.actions
+            if (Array.isArray(parsed.configUpdates)) configUpdates = parsed.configUpdates
           }
         } catch {
           // Not valid JSON — ignore, stdout is still captured as raw text
@@ -187,7 +190,8 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
         stdout,
         stderr,
         display,
-        actions
+        actions,
+        configUpdates
       })
     })
   })

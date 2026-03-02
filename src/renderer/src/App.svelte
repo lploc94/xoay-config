@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import type { Profile, Category, ConfigItem, Preset, SwitchResult, SyncResult, ProfileHook, HookDisplayValue } from '../../shared/types'
+  import type { Profile, Category, ConfigItem, Preset, SwitchResult, ProfileHook, DisplayItem } from '../../shared/types'
   import * as ipc from './lib/ipc'
   import Sidebar from './lib/Sidebar.svelte'
   import ProfileDetail from './lib/ProfileDetail.svelte'
@@ -31,7 +31,7 @@
   let showHookForm = $state(false)
   let editingHook = $state<ProfileHook | null>(null)
   let hookNotification = $state<{ message: string; hookLabel: string } | null>(null)
-  let hookDisplayData = $state<Record<string, Record<string, HookDisplayValue>>>({})
+  let hookDisplayData = $state<Record<string, DisplayItem[]>>({})
   let hookDisplayTimestamps = $state<Record<string, number>>({})
 
   const selectedProfile = $derived(profiles.find((p) => p.id === selectedProfileId) ?? null)
@@ -41,7 +41,7 @@
       : false
   )
   const selectedProfileDisplayData = $derived(
-    selectedProfileId ? (hookDisplayData[selectedProfileId] ?? {}) : {}
+    selectedProfileId ? (hookDisplayData[selectedProfileId] ?? []) : []
   )
 
   // ── Data Loading ───────────────────────────────────────────────
@@ -195,20 +195,6 @@
       await loadData()
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
-    }
-  }
-
-  // ── Sync Actions ──────────────────────────────────────────────
-  async function handleSyncProfile(): Promise<SyncResult[]> {
-    if (!selectedProfile) return []
-    try {
-      const { results } = await ipc.syncProfile(selectedProfile.id)
-      return results
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e)
-      return []
-    } finally {
-      await loadData()
     }
   }
 
@@ -441,7 +427,6 @@
           onToggleItem={handleToggleItem}
           onImportCurrent={handleImportIntoProfile}
           onRenameProfile={handleRenameProfile}
-          onSync={handleSyncProfile}
           onAddHook={handleAddHook}
           onEditHook={handleEditHook}
           onDeleteHook={handleDeleteHook}

@@ -139,25 +139,25 @@ When you switch from one profile to another, hooks run in this order:
 │  2. pre-switch-out hooks (OLD profile)                              │
 │     └─ Old config is still in place                                │
 │                                                                     │
-│  3. Sync active profile                                             │
-│     └─ Best-effort: anchor-based sync of changed files             │
+│  2.5. Apply configUpdates from pre-switch-out hooks                 │
+│       └─ Hooks can return configUpdates to sync files from disk    │
 │                                                                     │
-│  4. post-switch-out hooks (OLD profile)                             │
-│     └─ Sync complete, old config about to be replaced              │
+│  3. post-switch-out hooks (OLD profile)                             │
+│     └─ Config updates applied, old config about to be replaced     │
 │                                                                     │
-│  5. switchEngine.switch(newProfile)                                 │
+│  4. switchEngine.switch(newProfile)                                 │
 │     └─ Config files are replaced/applied here                      │
 │                                                                     │
-│  6. pre-switch-in hooks (NEW profile)                               │
+│  5. pre-switch-in hooks (NEW profile)                               │
 │     └─ New config applied, but activeProfileId not yet updated     │
 │                                                                     │
-│  7. Update activeProfileId                                          │
+│  6. Update activeProfileId                                          │
 │     └─ Profile is now officially active                            │
 │                                                                     │
-│  8. post-switch-in hooks (NEW profile)                              │
+│  7. post-switch-in hooks (NEW profile)                              │
 │     └─ Profile fully active, safe to query status                  │
 │                                                                     │
-│  9. Start cron hooks (NEW profile)                                  │
+│  8. Start cron hooks (NEW profile)                                  │
 │     └─ Periodic hooks begin running on their intervals             │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
@@ -165,10 +165,11 @@ When you switch from one profile to another, hooks run in this order:
 
 **Key points:**
 
-- Steps 2 and 4 run hooks from the **old** profile. Steps 6 and 8 run hooks from the **new** profile.
+- Steps 2 and 3 run hooks from the **old** profile. Steps 5 and 7 run hooks from the **new** profile.
+- Step 2.5 applies `configUpdates` returned by pre-switch-out hooks — this is how the built-in `sync-config.js` hook syncs file changes from disk back to stored profile data.
 - All hooks are best-effort — a failure at any step does not block the switch.
 - Hook results from all steps are collected and displayed in the switch result dialog.
-- Steps 6-9 only run if the switch engine succeeds (step 5).
+- Steps 5-8 only run if the switch engine succeeds (step 4).
 
 ## Input — Hook Context
 
@@ -246,7 +247,10 @@ Hooks communicate results back to the app by writing JSON to `stdout`. The app a
   "actions": {
     "switchToNextProfile": true,
     "notify": "Quota exhausted, switching profile"
-  }
+  },
+  "configUpdates": [
+    { "itemId": "item-1", "content": "updated file content..." }
+  ]
 }
 ```
 
@@ -307,6 +311,34 @@ console.log(JSON.stringify({
 }));
 ```
 
+### `configUpdates` — Modify Profile Items
+
+Hooks can return a `configUpdates` array to update profile config items (e.g., sync file content from disk). Each entry targets a specific item by ID and provides the new content or value.
+
+```json
+{
+  "configUpdates": [
+    { "itemId": "item-1", "content": "new file content..." },
+    { "itemId": "item-2", "value": "new-env-value" }
+  ]
+}
+```
+
+| Property | Type | Description |
+| --- | --- | --- |
+| itemId | string | ID of the config item to update |
+| content | string | New content for `file-replace` items |
+| value | string | New value for `env-var` items |
+
+**How it works:**
+
+- Config updates are processed during the switch flow, after `pre-switch-out` hooks run (step 2.5 in the lifecycle diagram).
+- The app matches each `itemId` to the profile's items and updates the stored content/value.
+- Only `file-replace` items accept `content`, and only `env-var` items accept `value`. Mismatches are logged and skipped.
+- This mechanism replaces the old anchor-based sync system — hooks now handle all config syncing explicitly.
+
+**Use case:** The built-in `sync-config.js` hook uses `configUpdates` to read files from disk before a switch-out and update the stored profile data with any changes the user made externally.
+
 ### Non-JSON output
 
 If your script writes non-JSON text to stdout, it is simply ignored. The hook still succeeds or fails based on its exit code. This means you can safely use `console.log()` for debugging during development — just make sure your final output is the JSON line if you want structured data.
@@ -361,6 +393,215 @@ ping('https://api.example.com/health').then((result) => {
       health: {
         value: result.ok ? 'Healthy' : `Down ( 
 ```
+
+## Background Cron Hooks
+
+By default, cron hooks only run while their profile is the **active** profile. When you switch away, they stop. Background cron hooks change this — they run for **all profiles simultaneously**, regardless of which profile is currently active.
+
+### Enabling background mode
+
+Set `runInBackground: true` on a cron hook (in the hook edit UI or via the `hook:add` / `hook:update` IPC channels):
+
+```ts
+{
+  type: 'cron',
+  runInBackground: true,
+  cronIntervalMs: 60000,
+  // ...other hook fields
+}
+```
+
+### How it differs from regular cron
+
+| Behavior | Regular cron | Background cron (`runInBackground: true`) |
+| --- | --- | --- |
+| Starts when | Profile becomes active | App startup (for every profile) |
+| Stops when | Profile switches away or app quits | App quits |
+| Affected by profile switching | Yes — stops on switch-out, starts on switch-in | No — keeps running across switches |
+| Runs for | Active profile only | All profiles with background cron hooks |
+
+### Lifecycle
+
+1. **App startup:** The app scans all profiles and starts background cron hooks for every profile that has at least one enabled cron hook with `runInBackground: true`. The first run happens immediately — it does not wait for the interval.
+2. **Running:** Each background cron hook runs independently on its own `setInterval`, just like regular crons. Multiple background hooks across multiple profiles can run concurrently.
+3. **Profile switching:** Background crons are **not affected** by profile switches. Regular (non-background) crons stop and start as usual.
+4. **App quit:** All background crons stop on the `before-quit` event.
+
+### Use case: monitoring across all accounts
+
+The primary use case is monitoring quota or usage across all accounts at once. For example, you have 5 API accounts and want to see each account's remaining quota in real-time — even when only one account is actively in use.
+
+```js
+// quota-monitor.js — Background cron hook
+// Checks API quota for this profile's account, regardless of active state
+const https = require('https');
+const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
+
+// Each profile's hook runs with its own context, so ctx.profile
+// contains that specific profile's config items and credentials
+const apiKey = ctx.profile.items
+  .find(i => i.type === 'env-var' && i.name === 'API_KEY')?.value;
+
+if (!apiKey) process.exit(0);
+
+https.get(`https://api.example.com/quota?key=${apiKey}`, (res) => {
+  let data = '';
+  res.on('data', (chunk) => data += chunk);
+  res.on('end', () => {
+    const quota = JSON.parse(data);
+    console.log(JSON.stringify({
+      display: [
+        {
+          type: 'text',
+          label: 'API Quota',
+          value: `${quota.remaining}/${quota.limit}`,
+          status: quota.remaining < 100 ? 'error' : quota.remaining < 500 ? 'warning' : 'ok'
+        }
+      ]
+    }));
+  });
+}).on('error', () => process.exit(1));
+```
+
+## Rich Display Types
+
+Hooks can return structured display data that the app renders in the Status Card grid. There are 6 display types, each optimized for a different kind of data.
+
+### Output format
+
+The new display format uses an array of `DisplayItem` objects:
+
+```json
+{
+  "display": [
+    { "type": "text", "label": "Account", "value": "user@example.com" },
+    { "type": "percentage", "label": "Quota Used", "value": 75, "max": 100, "status": "warning" },
+    { "type": "status", "label": "API Health", "value": "Healthy", "status": "ok" }
+  ]
+}
+```
+
+### Display types
+
+#### `text`
+
+Plain text display. The default and most common type.
+
+```json
+{ "type": "text", "label": "Account", "value": "user@example.com" }
+```
+
+#### `number`
+
+Numeric value display.
+
+```json
+{ "type": "number", "label": "Requests Today", "value": 1542 }
+```
+
+#### `percentage`
+
+A value out of a maximum. Use `max` to set the upper bound (default: 100).
+
+```json
+{ "type": "percentage", "label": "Quota Used", "value": 75, "max": 100, "status": "warning" }
+```
+
+#### `status`
+
+A status indicator with color coding.
+
+```json
+{ "type": "status", "label": "API Health", "value": "Operational", "status": "ok" }
+```
+
+#### `key-value`
+
+Multiple key-value pairs in a single card. Use the `entries` field.
+
+```json
+{
+  "type": "key-value",
+  "label": "Rate Limits",
+  "value": "3 limits",
+  "entries": {
+    "Requests/min": "60",
+    "Requests/hour": "1000",
+    "Requests/day": "10000"
+  }
+}
+```
+
+#### `html`
+
+Raw HTML content for custom rendering. Use with caution — only use with trusted scripts.
+
+```json
+{ "type": "html", "label": "Custom", "value": "<strong>Bold text</strong>" }
+```
+
+### Grid layout with `span`
+
+Each display item can specify a `span` to control how many columns it occupies in the 3-column Status Card grid:
+
+| Span value | Columns | Use for |
+| --- | --- | --- |
+| `1` (default) | 1 of 3 | Single values, short text |
+| `2` | 2 of 3 | Medium content, key-value pairs |
+| `3` | 3 of 3 | Wide content |
+| `"full"` | Full width | HTML content, large tables |
+
+```json
+{
+  "display": [
+    { "type": "text", "label": "Account", "value": "user@example.com", "span": 2 },
+    { "type": "status", "label": "Status", "value": "Active", "status": "ok", "span": 1 },
+    { "type": "key-value", "label": "Limits", "value": "Details", "entries": { "RPM": "60", "RPD": "10000" }, "span": "full" }
+  ]
+}
+```
+
+### DisplayItem fields
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| type | `"text"` \| `"number"` \| `"percentage"` \| `"status"` \| `"key-value"` \| `"html"` | Yes | Display type |
+| label | string | Yes | Human-readable label shown below the value |
+| value | string \| number \| null | Yes | The display value. `null` removes this item. |
+| max | number | No | For `percentage` type — the max value (default: 100) |
+| status | `"ok"` \| `"warning"` \| `"error"` | No | Color coding: green, yellow, red |
+| entries | Record\<string, string\> | No | For `key-value` type — the key-value pairs |
+| span | `1` \| `2` \| `3` \| `"full"` | No | Grid column span (default: 1) |
+
+### Backward compatibility
+
+The old `Record<string, HookDisplayValue>` format is still supported. The app automatically converts it to the new `DisplayItem[]` format at runtime:
+
+**Old format (still works):**
+
+```json
+{
+  "display": {
+    "quota": { "value": "1500/5000", "label": "API Quota", "status": "ok" },
+    "lastCheck": { "value": "2025-06-15 14:30", "label": "Last Check" }
+  }
+}
+```
+
+This is automatically converted to:
+
+```json
+{
+  "display": [
+    { "type": "text", "label": "API Quota", "value": "1500/5000", "status": "ok" },
+    { "type": "text", "label": "Last Check", "value": "2025-06-15 14:30" }
+  ]
+}
+```
+
+When the old format is detected (an object instead of an array), each key-value pair is converted to a `text` type `DisplayItem`. The `label` defaults to the object key name if not specified. All old fields (`value`, `label`, `status`) are preserved.
+
+> **Recommendation:** Use the new array format for new hooks. It gives you access to all 6 display types, the `span` layout control, and the `entries` field for key-value data.
 
 ## Managing Hooks via UI
 
@@ -477,6 +718,44 @@ const logFile = path.join(require('os').homedir(), '.xoay', 'switch-log.txt');
 const timestamp = new Date().toISOString();
 const line = `[ 
 ```
+
+## Built-in Hooks
+
+Built-in hooks are scripts that ship with the app and are automatically attached to new profiles. They provide essential functionality like config syncing.
+
+### How built-in hooks work
+
+- **Auto-attached:** When you create a new profile, the app automatically adds all built-in hooks to it.
+- **Disable-only:** Built-in hooks can be disabled (toggled off) but cannot be deleted. The delete button is hidden in the UI.
+- **"Built-in" badge:** Built-in hooks display a "Built-in" badge in the hook edit dialog to distinguish them from user hooks.
+- **`builtIn` flag:** In the data model, built-in hooks have `builtIn: true` on the `ProfileHook` object.
+- **Script resolution:** Built-in hook scripts use the `builtin/` prefix in their `scriptPath` (e.g., `builtin/sync-config.js`). The app resolves this to the bundled `resources/hooks/` directory.
+
+### `sync-config.js` — Config Sync Hook
+
+The `sync-config.js` built-in hook replaces the old anchor-based sync system. It runs as a `pre-switch-out` hook and reads config files from disk to detect changes made while the profile was active.
+
+**What it does:**
+
+1. Iterates over all enabled items in the current profile.
+2. For `file-replace` items: reads the target file from disk and compares it to the stored content.
+3. For `env-var` items: reads the shell config file, extracts the variable value, and compares it to the stored value.
+4. Returns a `configUpdates` array with any changes found.
+
+**Output format:**
+
+```json
+{
+  "configUpdates": [
+    { "itemId": "item-1", "content": "updated file content from disk" },
+    { "itemId": "item-2", "value": "updated-env-value" }
+  ]
+}
+```
+
+**Why this matters:** If you edit a config file (e.g., `~/.aws/credentials`) while a profile is active, the sync hook captures those edits before switching away. Without it, your manual changes would be lost because the app only stores the content from when you last switched in.
+
+**Migration from anchor-sync:** In previous versions, config items had an `anchor` field and the app used a dedicated `anchor-sync` module to detect file changes. This has been replaced entirely by the `sync-config.js` hook, which provides the same functionality through the standard hook system. The `anchor` field has been removed from config items.
 
 ## Security
 

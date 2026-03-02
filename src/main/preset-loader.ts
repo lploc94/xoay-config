@@ -1,8 +1,27 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
+import { randomUUID } from 'crypto'
 import type { Preset, PresetFile, PresetHookDef, ConfigItem, Category, ProfileHook } from '../shared/types'
 import { PATHS } from './paths'
+
+// ── Built-in hook definitions ────────────────────────────────────
+
+/** Hook definitions that are automatically attached to every new profile. */
+const BUILT_IN_HOOKS: Omit<ProfileHook, 'id'>[] = [
+  {
+    label: 'Sync Config',
+    enabled: true,
+    type: 'pre-switch-out',
+    scriptPath: 'builtin/sync-config.js',
+    builtIn: true
+  }
+]
+
+/** Return built-in hooks with fresh UUIDs for attaching to a new profile. */
+export function getBuiltInHooks(): ProfileHook[] {
+  return BUILT_IN_HOOKS.map((h) => ({ ...h, id: randomUUID() }))
+}
 
 // ── Resource path resolution ────────────────────────────────────
 
@@ -59,8 +78,6 @@ function presetFileToPreset(pf: PresetFile): Preset {
         return { ...base, type: 'file-replace' as const, targetPath: item.targetPath ?? '', content: '' }
       case 'env-var':
         return { ...base, type: 'env-var' as const, name: item.name ?? '', value: item.value ?? '', shellFile: item.shellFile ?? '~/.zshrc' }
-      case 'run-command':
-        return { ...base, type: 'run-command' as const, command: item.command ?? '', workingDir: item.workingDir, timeout: item.timeout }
       default:
         return { ...base, type: 'file-replace' as const, targetPath: '', content: '' }
     }
@@ -162,8 +179,6 @@ export function exportPreset(
           return { ...base, targetPath: item.targetPath }
         case 'env-var':
           return { ...base, name: item.name, value: item.value, shellFile: item.shellFile }
-        case 'run-command':
-          return { ...base, command: item.command, workingDir: item.workingDir, timeout: item.timeout }
         default:
           return base
       }
