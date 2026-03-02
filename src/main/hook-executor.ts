@@ -313,15 +313,15 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
       contextTempFile
     })
 
-    // Send run message to the runner
+    // Send run message to the runner.
+    // env carries XOAY_HOOK_CONTEXT or XOAY_HOOK_CONTEXT_FILE — the runner
+    // applies env into process.env before executing the script.
     try {
       runner!.send({
         type: 'run',
         id,
         scriptPath: resolvedPath,
-        env,
-        contextJson,
-        timeout
+        env
       })
     } catch (err) {
       pendingRequests.delete(id)
