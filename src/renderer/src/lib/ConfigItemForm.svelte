@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { XIcon, FileIcon, VariableIcon } from '@lucide/svelte'
+  import { XIcon, FileIcon, VariableIcon, SquareTerminalIcon } from '@lucide/svelte'
   import { Dialog, Portal } from '@skeletonlabs/skeleton-svelte'
-  import type { ConfigItem, FileReplaceItem, EnvVarItem } from '../../../shared/types'
+  import type { ConfigItem, FileReplaceItem, EnvVarItem, RunCommandItem } from '../../../shared/types'
 
   interface Props {
     item?: ConfigItem | null
@@ -25,6 +25,11 @@
   let envValue = $state('')
   let shellFile = $state('~/.zshrc')
 
+  // run-command fields
+  let command = $state('')
+  let workingDir = $state('')
+  let timeout = $state(30)
+
   $effect(() => {
     if (open) {
       const i = item
@@ -36,6 +41,9 @@
       envName = (i as EnvVarItem)?.name ?? ''
       envValue = (i as EnvVarItem)?.value ?? ''
       shellFile = (i as EnvVarItem)?.shellFile ?? '~/.zshrc'
+      command = (i as RunCommandItem)?.command ?? ''
+      workingDir = (i as RunCommandItem)?.workingDir ?? ''
+      timeout = Math.ceil(((i as RunCommandItem)?.timeout ?? 30000) / 1000)
     }
   })
 
@@ -45,8 +53,10 @@
 
     if (itemType === 'file-replace') {
       result = { id, type: 'file-replace', label, enabled, targetPath, content }
-    } else {
+    } else if (itemType === 'env-var') {
       result = { id, type: 'env-var', label, enabled, name: envName, value: envValue, shellFile }
+    } else {
+      result = { id, type: 'run-command', label, enabled, command, workingDir: workingDir || undefined, timeout: Math.max(1, timeout) * 1000 }
     }
 
     onSave(result)
@@ -84,6 +94,9 @@
               <button type="button" class="btn text-sm {itemType === 'env-var' ? 'preset-filled' : 'preset-tonal'}" onclick={() => itemType = 'env-var'}>
                 <VariableIcon class="size-4" /> Env Var
               </button>
+              <button type="button" class="btn text-sm {itemType === 'run-command' ? 'preset-filled' : 'preset-tonal'}" onclick={() => itemType = 'run-command'}>
+                <SquareTerminalIcon class="size-4" /> Run Command
+              </button>
             </div>
           </div>
           {/if}
@@ -104,7 +117,7 @@
               <label for="file-content" class="label text-sm font-medium mb-1">Content</label>
               <textarea id="file-content" class="textarea min-h-[120px] font-mono text-sm" bind:value={content} placeholder="File content..." rows="6"></textarea>
             </div>
-          {:else}
+          {:else if itemType === 'env-var'}
             <div>
               <label for="env-name" class="label text-sm font-medium mb-1">Variable Name</label>
               <input id="env-name" class="input" type="text" bind:value={envName} placeholder="ANTHROPIC_AUTH_TOKEN" required />
@@ -116,6 +129,19 @@
             <div>
               <label for="shell-file" class="label text-sm font-medium mb-1">Shell File</label>
               <input id="shell-file" class="input" type="text" bind:value={shellFile} placeholder="~/.zshrc" required />
+            </div>
+          {:else}
+            <div>
+              <label for="run-command" class="label text-sm font-medium mb-1">Command</label>
+              <textarea id="run-command" class="textarea min-h-[80px] font-mono text-sm" bind:value={command} placeholder="echo 'Hello World'" rows="3" required></textarea>
+            </div>
+            <div>
+              <label for="working-dir" class="label text-sm font-medium mb-1">Working Directory</label>
+              <input id="working-dir" class="input" type="text" bind:value={workingDir} placeholder="~/projects" />
+            </div>
+            <div>
+              <label for="cmd-timeout" class="label text-sm font-medium mb-1">Timeout (seconds)</label>
+              <input id="cmd-timeout" class="input" type="number" bind:value={timeout} min="1" />
             </div>
           {/if}
 

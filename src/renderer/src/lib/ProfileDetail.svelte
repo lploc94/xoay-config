@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     PlayIcon, TrashIcon, PencilIcon, PlusIcon, DownloadIcon,
-    FileIcon, VariableIcon,
+    FileIcon, VariableIcon, SquareTerminalIcon,
     CheckIcon, XIcon,
     ZapIcon, ClockIcon
   } from '@lucide/svelte'
@@ -55,16 +55,22 @@
 
   function typeIcon(type: ConfigItem['type']) {
     if (type === 'file-replace') return FileIcon
+    if (type === 'run-command') return SquareTerminalIcon
     return VariableIcon
   }
 
   function typeLabel(type: ConfigItem['type']): string {
     if (type === 'file-replace') return 'File Replace'
+    if (type === 'run-command') return 'Run Command'
     return 'Env Variable'
   }
 
   function itemSummary(item: ConfigItem): string {
     if (item.type === 'file-replace') return item.targetPath
+    if (item.type === 'run-command') {
+      const cmd = item.command
+      return cmd.length > 60 ? cmd.substring(0, 60) + '...' : cmd
+    }
     return `${item.name} = ${item.value ? item.value.substring(0, 20) + (item.value.length > 20 ? '...' : '') : '(empty)'}`
   }
 
@@ -72,7 +78,8 @@
   const groupedItems = $derived.by(() => {
     const groups: Record<ConfigItem['type'], ConfigItem[]> = {
       'file-replace': [],
-      'env-var': []
+      'env-var': [],
+      'run-command': []
     }
     for (const item of profile.items) {
       groups[item.type].push(item)
@@ -255,7 +262,7 @@
       </div>
     {/if}
 
-    {#each (['file-replace', 'env-var'] as const) as type}
+    {#each (['file-replace', 'env-var', 'run-command'] as const) as type}
       {@const items = groupedItems[type]}
       {#if items.length > 0}
         {@const Icon = typeIcon(type)}

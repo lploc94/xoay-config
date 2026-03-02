@@ -83,20 +83,15 @@ function presetFileToPreset(pf: PresetFile): Preset {
       case 'env-var':
         defaultItems.push({ ...base, type: 'env-var' as const, name: item.name ?? '', value: item.value ?? '', shellFile: item.shellFile ?? '~/.zshrc' })
         break
-      case 'run-command': {
-        // Legacy run-command items → report as hook defs (no disk writes here).
-        // Actual script files are written in importPresetFile() / ensureRunCommandScript().
-        const timeout: number = item.timeout ?? 30000
-        const scriptName = runCommandScriptName(pf.id, item)
-
-        extraHooks.push({
-          label: item.label ?? 'Migrated Command',
-          type: 'post-switch-in',
-          timeout,
-          scriptFile: scriptName
+      case 'run-command':
+        defaultItems.push({
+          ...base,
+          type: 'run-command' as const,
+          command: item.command ?? '',
+          workingDir: item.workingDir,
+          timeout: item.timeout
         })
         break
-      }
       default:
         defaultItems.push({ ...base, type: 'file-replace' as const, targetPath: '', content: '' })
     }
@@ -286,6 +281,8 @@ export function exportPreset(
           return { ...base, targetPath: item.targetPath }
         case 'env-var':
           return { ...base, name: item.name, value: item.value, shellFile: item.shellFile }
+        case 'run-command':
+          return { ...base, command: item.command, workingDir: item.workingDir, timeout: item.timeout }
         default:
           return base
       }

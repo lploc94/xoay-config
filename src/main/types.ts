@@ -4,6 +4,7 @@ export {
   type BaseConfigItem,
   type FileReplaceItem,
   type EnvVarItem,
+  type RunCommandItem,
   type ConfigItem,
   type Profile,
   type Preset,

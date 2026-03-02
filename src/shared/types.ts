@@ -19,7 +19,14 @@ export interface EnvVarItem extends BaseConfigItem {
   shellFile: string
 }
 
-export type ConfigItem = FileReplaceItem | EnvVarItem
+export interface RunCommandItem extends BaseConfigItem {
+  type: 'run-command'
+  command: string
+  workingDir?: string
+  timeout?: number
+}
+
+export type ConfigItem = FileReplaceItem | EnvVarItem | RunCommandItem
 
 // ── Hook Types ──────────────────────────────────────────────────
 

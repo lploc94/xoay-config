@@ -1,5 +1,6 @@
 import { readFile, writeFile, rename, mkdir, copyFile, readdir } from 'fs/promises'
 import { existsSync } from 'fs'
+import { execSync } from 'child_process'
 import { dirname, join, basename } from 'path'
 import { homedir } from 'os'
 import type {
@@ -7,6 +8,7 @@ import type {
   ConfigItem,
   FileReplaceItem,
   EnvVarItem,
+  RunCommandItem,
   ItemResult,
   SwitchResult
 } from './types'
@@ -72,6 +74,16 @@ export class SwitchEngine {
     // Rollback file-replace and env-var if failed
     if (failed) {
       await this.restoreBackup(backupId)
+    }
+
+    // Phase 3: run-command (only if file-replace/env-var succeeded)
+    // Run-command failures do NOT trigger rollback or affect SwitchResult.success
+    if (!failed) {
+      const cmdItems = enabledItems.filter((i): i is RunCommandItem => i.type === 'run-command')
+      for (const item of cmdItems) {
+        const result = this.executeRunCommand(item)
+        results.push(result)
+      }
     }
 
     return {
@@ -278,6 +290,40 @@ export class SwitchEngine {
       return {
         itemId: item.id,
         type: 'env-var',
+        label: item.label,
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  }
+
+  /**
+   * Execute a run-command item using child_process.execSync.
+   * Failures are recorded but do not trigger rollback.
+   */
+  private executeRunCommand(item: RunCommandItem): ItemResult {
+    const cwd = item.workingDir ? this.resolvePath(item.workingDir) : process.cwd()
+    const timeout = item.timeout ?? 30000
+
+    try {
+      const stdout = execSync(item.command, {
+        cwd,
+        timeout,
+        shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+        encoding: 'utf-8'
+      })
+
+      return {
+        itemId: item.id,
+        type: 'run-command',
+        label: item.label,
+        success: true,
+        stdout: stdout ?? undefined
+      }
+    } catch (err) {
+      return {
+        itemId: item.id,
+        type: 'run-command',
         label: item.label,
         success: false,
         error: err instanceof Error ? err.message : String(err)
