@@ -15,8 +15,6 @@ The hook system lets you attach JavaScript scripts to profiles. Scripts run auto
 
 **Best-effort execution:** Hook failures never block a profile switch. If a hook fails (timeout, crash, non-zero exit), the error is captured and shown in the switch result dialog, but the switch continues normally.
 
----
-
 ## Hook Types
 
 Each hook has a `type` that determines when it runs during the switch lifecycle.
@@ -35,17 +33,7 @@ const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
 try {
   const status = execSync('git status --porcelain', { encoding: 'utf-8' }).trim();
   if (status) {
-    execSync(`git stash push -m "xoay-auto: ${ctx.profileName}"`);
-    console.log(JSON.stringify({
-      display: {
-        gitStash: { value: 'Stashed', label: 'Git State', status: 'ok' }
-      }
-    }));
-  }
-} catch (err) {
-  console.error('Git stash failed:', err.message);
-  process.exit(1);
-}
+    execSync(`git stash push -m "xoay-auto:  
 ```
 
 ### `post-switch-out`
@@ -61,10 +49,7 @@ const fs = require('fs');
 const path = require('path');
 
 const logFile = path.join(require('os').homedir(), '.xoay', 'switch-log.txt');
-const line = `[${new Date().toISOString()}] Left profile "${ctx.profileName}"\n`;
-
-fs.mkdirSync(path.dirname(logFile), { recursive: true });
-fs.appendFileSync(logFile, line);
+const line = `[ 
 ```
 
 ### `pre-switch-in`
@@ -91,19 +76,7 @@ if (missing.length > 0) {
   console.log(JSON.stringify({
     display: {
       configCheck: {
-        value: `${missing.length} file(s) missing`,
-        label: 'Config Validation',
-        status: 'warning'
-      }
-    }
-  }));
-} else {
-  console.log(JSON.stringify({
-    display: {
-      configCheck: { value: 'All files present', label: 'Config Validation', status: 'ok' }
-    }
-  }));
-}
+        value: ` 
 ```
 
 ### `post-switch-in`
@@ -120,16 +93,7 @@ const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
 
 const logFile = path.join(require('os').homedir(), '.xoay', 'switch-log.txt');
 const timestamp = new Date().toISOString();
-const line = `[${timestamp}] Switched to "${ctx.profileName}" (${ctx.hookType})\n`;
-
-fs.mkdirSync(path.dirname(logFile), { recursive: true });
-fs.appendFileSync(logFile, line);
-
-console.log(JSON.stringify({
-  display: {
-    lastSwitch: { value: timestamp, label: 'Last Switch' }
-  }
-}));
+const line = `[ 
 ```
 
 ### `cron`
@@ -157,27 +121,8 @@ checkQuota().then((quota) => {
   const output = {
     display: {
       quota: {
-        value: `${quota.remaining}/${quota.total}`,
-        label: 'API Quota',
-        status: quota.remaining > 100 ? 'ok' : quota.remaining > 0 ? 'warning' : 'error'
-      }
-    }
-  };
-
-  // Auto-switch if quota is exhausted
-  if (quota.remaining === 0) {
-    output.actions = { switchToNextProfile: true };
-    output.display.quota.value += ' (switching...)';
-  }
-
-  console.log(JSON.stringify(output));
-}).catch((err) => {
-  console.error('Quota check failed:', err.message);
-  process.exit(1);
-});
+        value: ` 
 ```
-
----
 
 ## Hook Lifecycle
 
@@ -224,8 +169,6 @@ When you switch from one profile to another, hooks run in this order:
 - All hooks are best-effort — a failure at any step does not block the switch.
 - Hook results from all steps are collected and displayed in the switch result dialog.
 - Steps 6-9 only run if the switch engine succeeds (step 5).
-
----
 
 ## Input — Hook Context
 
@@ -275,13 +218,11 @@ const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
 ### Fields
 
 | Field | Type | Description |
-|-------|------|-------------|
-| `profileId` | `string` | ID of the profile this hook belongs to |
-| `profileName` | `string` | Human-readable name of the profile |
-| `hookType` | `string` | One of: `pre-switch-out`, `post-switch-out`, `pre-switch-in`, `post-switch-in`, `cron` |
-| `profile` | `object` | Full profile object including `items` and `hooks` |
-
----
+| --- | --- | --- |
+| profileId | string | ID of the profile this hook belongs to |
+| profileName | string | Human-readable name of the profile |
+| hookType | string | One of: pre-switch-out, post-switch-out, pre-switch-in, post-switch-in, cron |
+| profile | object | Full profile object including items and hooks |
 
 ## Output — Structured Response
 
@@ -314,10 +255,10 @@ Hooks communicate results back to the app by writing JSON to `stdout`. The app a
 Each key in `display` is a named field shown on the profile detail view.
 
 | Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `value` | `string \| null` | Yes | The display value. Set to `null` to remove this field. |
-| `label` | `string` | No | Human-readable label (e.g., "API Quota"). Defaults to the key name. |
-| `status` | `"ok" \| "warning" \| "error"` | No | Color coding for the value. |
+| --- | --- | --- | --- |
+| value | string | null | Yes | The display value. Set to null to remove this field. |
+| label | string | No | Human-readable label (e.g., "API Quota"). Defaults to the key name. |
+| status | "ok" | "warning" | "error" | No | Color coding for the value. |
 
 **Merge semantics:**
 
@@ -346,10 +287,10 @@ console.log(JSON.stringify({
 Actions let hooks trigger application behavior. Only processed when the hook exits with code 0 (success).
 
 | Property | Type | Description |
-|----------|------|-------------|
-| `switchToNextProfile` | `boolean` | Switch to the next profile in the list (circular order) |
-| `switchToProfile` | `string` | Switch to a specific profile by ID (overrides `switchToNextProfile`) |
-| `notify` | `string` | Show an inline notification with a custom message |
+| --- | --- | --- |
+| switchToNextProfile | boolean | Switch to the next profile in the list (circular order) |
+| switchToProfile | string | Switch to a specific profile by ID (overrides switchToNextProfile) |
+| notify | string | Show an inline notification with a custom message |
 
 **Restrictions on switch actions:**
 
@@ -370,8 +311,6 @@ console.log(JSON.stringify({
 
 If your script writes non-JSON text to stdout, it is simply ignored. The hook still succeeds or fails based on its exit code. This means you can safely use `console.log()` for debugging during development — just make sure your final output is the JSON line if you want structured data.
 
----
-
 ## Cron Hooks
 
 Cron hooks run on a repeating interval while their profile is active.
@@ -379,19 +318,19 @@ Cron hooks run on a repeating interval while their profile is active.
 ### Configuration
 
 | Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `cronIntervalMs` | `number` | `60000` (1 min) | Interval in milliseconds between runs |
-| `timeout` | `number` | `30000` (30s) | Maximum execution time per run |
+| --- | --- | --- | --- |
+| cronIntervalMs | number | 60000 (1 min) | Interval in milliseconds between runs |
+| timeout | number | 30000 (30s) | Maximum execution time per run |
 
 **Minimum interval:** 10 seconds (10,000 ms). Values below this are clamped to 10 seconds.
 
 ### Lifecycle
 
-1. **Start:** Cron hooks start automatically when their profile becomes active (after `post-switch-in` hooks complete).
+1. **Start:** Cron hooks start automatically when their profile becomes active (after `post-switch-in` hooks complete). **The first run happens immediately** — the hook does not wait for the interval to elapse.
 2. **Run:** Each hook runs independently on its own `setInterval`. Multiple cron hooks can run concurrently.
 3. **Stop:** All cron hooks stop when:
-   - You switch to a different profile
-   - The app quits (`before-quit` event)
+  - You switch to a different profile
+  - The app quits (`before-quit` event)
 
 ### Error handling
 
@@ -420,20 +359,8 @@ ping('https://api.example.com/health').then((result) => {
   console.log(JSON.stringify({
     display: {
       health: {
-        value: result.ok ? 'Healthy' : `Down (${result.status})`,
-        label: 'API Status',
-        status: result.ok ? 'ok' : 'error'
-      }
-    }
-  }));
-
-  if (!result.ok) {
-    process.exit(1); // Mark as failed, but scheduler will retry next interval
-  }
-});
+        value: result.ok ? 'Healthy' : `Down ( 
 ```
-
----
 
 ## Managing Hooks via UI
 
@@ -444,8 +371,8 @@ ping('https://api.example.com/health').then((result) => {
 3. Select a `.js` file using the file picker.
 4. Choose the hook type (`pre-switch-out`, `post-switch-out`, `pre-switch-in`, `post-switch-in`, or `cron`).
 5. Optionally configure:
-   - **Timeout** — Maximum execution time (default: 30 seconds).
-   - **Interval** — For cron hooks only. How often to run (default: 60 seconds, minimum: 10 seconds).
+  - **Timeout** — Maximum execution time (default: 30 seconds).
+  - **Interval** — For cron hooks only. How often to run (default: 60 seconds, minimum: 10 seconds).
 6. Save the hook.
 
 ### Editing and deleting
@@ -457,11 +384,40 @@ ping('https://api.example.com/health').then((result) => {
 
 Each hook has an enable/disable toggle. Disabled hooks are skipped during execution but remain configured on the profile.
 
-### Display data
+### Display Data in the UI
 
-Display data returned by hooks (via the `display` output field) is shown on the profile detail view. Each key-value pair appears with its label and optional status color coding.
+Display data returned by hooks (via the `display` output field) appears in several places across the app.
 
----
+#### Status Card
+
+The primary display area is the **Status Card** — a grid at the top of the profile detail view. Each key in the `display` output renders as a cell containing:
+
+- **Value** — the main text (e.g., `"1500/5000"`), color-coded by status: green (`ok`), yellow (`warning`), red (`error`).
+- **Label** — smaller text below the value (defaults to the key name if not specified).
+- **Status border** — a colored left border matching the status.
+
+The grid uses up to **3 columns** per row and wraps automatically when there are more than 3 fields.
+
+#### "Updated X ago" timestamp
+
+Below the Status Card, a timestamp shows when hooks last produced display data for this profile (e.g., "Updated 2m ago"). This timestamp:
+
+- Is stored **per profile** in `electron-store` (`hookDisplayTimestamps[profileId]`).
+- **Persists across app restarts** — navigating between profiles or restarting the app preserves it.
+- Only updates when a hook actually runs and produces new `display` data (via `mergeDisplayData()`).
+- Refreshes its relative time label every 10 seconds in the UI.
+
+#### Sidebar badges
+
+When a cron hook returns display data, the **first display value** for the active profile is shown as a small badge on the profile's sidebar entry. The badge shows the value text with a background color matching the status (`ok` = green, `warning` = yellow, `error` = red). Only the active profile in each category shows a badge.
+
+#### Tray menu
+
+The system tray menu also shows display data for active profiles. When a profile has display data, the tray menu item shows the profile name followed by the first display value in parentheses (e.g., `"Work Account (1500/5000)"`). Warning and error statuses are prefixed with a `⚠` symbol.
+
+#### Persistence
+
+All display data and timestamps are stored in `electron-store` and survive app restarts. The data is updated incrementally via merge semantics — only fields present in new hook output are updated, and fields not included are left unchanged. Setting a value to `null` explicitly removes that field.
 
 ## Writing a Hook — Guide
 
@@ -491,34 +447,22 @@ console.log(JSON.stringify({
 
 ### Step by step
 
-1. **Read the context:**
-   ```js
-   const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
-   // ctx.profileId, ctx.profileName, ctx.hookType, ctx.profile
-   ```
-
+1. **Read the context:**`const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
+// ctx.profileId, ctx.profileName, ctx.hookType, ctx.profile`
 2. **Do your work:** Run commands, read files, make HTTP requests — anything Node.js can do.
-
-3. **Return structured output (optional):**
-   ```js
-   console.log(JSON.stringify({
-     display: {
-       key: { value: 'some value', label: 'Display Label', status: 'ok' }
-     }
-   }));
-   ```
-
+3. **Return structured output (optional):**`console.log(JSON.stringify({
+  display: {
+    key: { value: 'some value', label: 'Display Label', status: 'ok' }
+  }
+}));`
 4. **Exit:** Exit with code 0 for success. Use `process.exit(1)` to indicate failure. Both are captured and shown in the UI.
 
 ### Tips
 
 - **Keep hooks fast.** The default timeout is 30 seconds. Long-running hooks delay the switch flow.
-- **Use `process.exit()`** to control the exit code. If your script just finishes, Node.js exits with code 0.
+- **Use **`process.exit()` to control the exit code. If your script just finishes, Node.js exits with code 0.
 - **Avoid interactive input.** Hooks run headless with no terminal — `stdin` is not available.
-- **Test locally** by setting the `XOAY_HOOK_CONTEXT` env var manually:
-  ```bash
-  XOAY_HOOK_CONTEXT='{"profileId":"test","profileName":"Test","hookType":"cron","profile":{"id":"test","name":"Test","items":[],"hooks":[]}}' node my-hook.js
-  ```
+- **Test locally** by setting the `XOAY_HOOK_CONTEXT` env var manually:` ' node my-hook.js`
 
 ### Full example: log-switch-time.js
 
@@ -531,24 +475,12 @@ const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT || '{}');
 
 const logFile = path.join(require('os').homedir(), '.xoay', 'switch-log.txt');
 const timestamp = new Date().toISOString();
-const line = `[${timestamp}] Switched to "${ctx.profileName}" (${ctx.hookType})\n`;
-
-fs.mkdirSync(path.dirname(logFile), { recursive: true });
-fs.appendFileSync(logFile, line);
-
-// Structured output: app will parse this and display on profile UI
-console.log(JSON.stringify({
-  display: {
-    lastSwitch: { value: timestamp, label: 'Last Switch' }
-  }
-}));
+const line = `[ 
 ```
-
----
 
 ## Security
 
-> **Hooks have full Node.js access.** There is no sandbox.
+> Hooks have full Node.js access. There is no sandbox.
 
 ### What hooks can do
 
