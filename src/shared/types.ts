@@ -81,6 +81,10 @@ export interface HookContext {
   profileName: string
   hookType: string
   profile: Profile
+  freshSwitch?: boolean
+  previousProfileId?: string
+  previousProfileName?: string
+  trigger?: 'switch' | 'startup' | 'schedule'
 }
 
 export interface HookResult {

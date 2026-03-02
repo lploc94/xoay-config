@@ -183,6 +183,8 @@ const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
 
 ### Context structure
 
+**Switch hook example** (`post-switch-in`):
+
 ```json
 {
   "profileId": "abc-123",
@@ -216,6 +218,50 @@ const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
 }
 ```
 
+**Cron hook example** — first run after a profile switch (`freshSwitch: true`):
+
+```json
+{
+  "profileId": "abc-123",
+  "profileName": "Work Account",
+  "hookType": "cron",
+  "freshSwitch": true,
+  "previousProfileId": "def-456",
+  "previousProfileName": "Personal Account",
+  "trigger": "switch",
+  "profile": { "..." }
+}
+```
+
+**Cron hook example** — startup (app launch, no switch occurred):
+
+```json
+{
+  "profileId": "abc-123",
+  "profileName": "Work Account",
+  "hookType": "cron",
+  "trigger": "startup",
+  "profile": { "..." }
+}
+```
+
+> **Note:** `freshSwitch` is omitted (`undefined`) on startup because no switch occurred — the cron was started at boot.
+
+**Cron hook example** — normal scheduled run (no recent switch):
+
+```json
+{
+  "profileId": "abc-123",
+  "profileName": "Work Account",
+  "hookType": "cron",
+  "freshSwitch": false,
+  "trigger": "schedule",
+  "profile": { "..." }
+}
+```
+
+> **Note:** `freshSwitch`, `previousProfileId`, `previousProfileName`, and `trigger` are only set on cron hooks. `previousProfileId` and `previousProfileName` are only present when `freshSwitch` is `true`.
+
 ### Fields
 
 | Field | Type | Description |
@@ -224,6 +270,60 @@ const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
 | profileName | string | Human-readable name of the profile |
 | hookType | string | One of: pre-switch-out, post-switch-out, pre-switch-in, post-switch-in, cron |
 | profile | object | Full profile object including items and hooks |
+| freshSwitch | boolean \| undefined | `true` on the first cron run after an account switch. `false` on subsequent scheduled cron runs. Omitted (`undefined`) on startup crons and absent for non-cron hooks. Use this to detect that shared resources (session logs, caches) may belong to the previous profile. |
+| previousProfileId | string \| undefined | ID of the profile that was switched away from. Only present when `freshSwitch` is `true`. |
+| previousProfileName | string \| undefined | Human-readable name of the profile that was switched away from. Only present when `freshSwitch` is `true`. |
+| trigger | `"switch"` \| `"startup"` \| `"schedule"` \| undefined | What caused this hook execution. `"switch"` = profile switch, `"startup"` = app launch (profile crons started at boot), `"schedule"` = normal cron interval. Absent for non-cron hooks. |
+
+> **Backward compatibility:** All four new fields (`freshSwitch`, `previousProfileId`, `previousProfileName`, `trigger`) are optional. Existing hooks that do not reference these fields continue to work without changes.
+
+### Handling fresh switches in cron hooks
+
+When a profile switch occurs, the first cron run for the new profile has `freshSwitch: true`. This signals that shared resources — such as session logs, cache files, or database connections — may still reference the **previous** profile's data. Hooks should use this flag to avoid acting on stale data.
+
+```js
+// cron-quota-check.js — Handles fresh switch by resetting cached data
+const ctx = JSON.parse(process.env.XOAY_HOOK_CONTEXT);
+
+if (ctx.freshSwitch) {
+  // First run after a switch — shared resources may be stale.
+  // Clear any cached data that belongs to the previous profile.
+  console.log(JSON.stringify({
+    display: [
+      {
+        type: 'status',
+        label: 'Quota',
+        value: 'Refreshing…',
+        status: 'warning'
+      }
+    ]
+  }));
+  // Optionally log which profile we came from:
+  // ctx.previousProfileId, ctx.previousProfileName
+  process.exit(0);
+}
+
+// Normal cron run — safe to use cached/shared resources
+checkQuota().then((remaining) => {
+  console.log(JSON.stringify({
+    display: [
+      {
+        type: 'percentage',
+        label: 'API Quota',
+        value: remaining,
+        max: 5000,
+        status: remaining < 500 ? 'error' : remaining < 2000 ? 'warning' : 'ok'
+      }
+    ]
+  }));
+});
+```
+
+**When is `trigger` useful?** Use `trigger` to distinguish how a cron hook was started:
+
+- `"switch"` — The cron started because a profile switch just completed. `freshSwitch` is `true`.
+- `"startup"` — The cron started at app launch (profile crons started at boot). `freshSwitch` is omitted (`undefined`/falsy).
+- `"schedule"` — A normal interval tick. `freshSwitch` is `false`.
 
 ## Output — Structured Response
 

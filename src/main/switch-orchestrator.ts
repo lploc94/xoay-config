@@ -141,7 +141,12 @@ export async function orchestrateSwitch(profileId: string): Promise<SwitchResult
       allHookResults.push(...postInResults)
 
       // Step 9: Start cron hooks for NEW profile
-      startCronHooks(profile.id)
+      startCronHooks(profile.id, {
+        freshSwitch: true,
+        previousProfileId: oldProfile?.id,
+        previousProfileName: oldProfile?.name,
+        trigger: 'switch'
+      })
     }
 
     // Step 10: Build tray menu & return result with hookResults

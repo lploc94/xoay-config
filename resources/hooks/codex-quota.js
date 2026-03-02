@@ -1,6 +1,7 @@
-// Codex CLI quota check hook — hybrid session log + API approach
-// Primary: parses Codex session logs for rate limit info (fast, local)
-// Fallback: calls ChatGPT backend API when no session data available
+// Codex CLI quota check hook — API-first with session log fallback
+// Primary: calls ChatGPT backend API for authoritative quota data
+// Fallback: parses Codex session logs when API unavailable (normal mode only)
+// Fresh switch: skips session log entirely; outputs nothing if API fails
 //
 // Output format:
 //   { display: { quota: {...}, quotaDetail: {...}, source: {...} }, actions: { switchToNextProfile: bool } }
@@ -206,57 +207,73 @@ function buildNoDataOutput(detail) {
   };
 }
 
+// ─── Hook context ───
+
+function parseHookContext() {
+  const raw = process.env.XOAY_HOOK_CONTEXT;
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function debugLog(msg) {
+  if (process.env.XOAY_DEBUG === '1') {
+    process.stderr.write(`[codex-quota] ${msg}\n`);
+  }
+}
+
 // ─── Main ───
 
 async function main() {
-  // Step 1: Try session log first (fast, local, no network)
-  const sessionFile = findLatestSessionFile();
-  let sessionRateLimits = null;
-  if (sessionFile) {
-    sessionRateLimits = parseSessionFile(sessionFile);
-    if (sessionRateLimits) {
-      // Check if data is still valid (primary window hasn't reset)
-      const primaryResetsAt = sessionRateLimits.primary.resets_at;
-      const nowSec = Math.floor(Date.now() / 1000);
+  const ctx = parseHookContext();
+  const freshSwitch = ctx.freshSwitch === true;
 
-      if (primaryResetsAt && nowSec < primaryResetsAt) {
-        // Data is still within the current window — use it
-        console.log(JSON.stringify(buildOutput(
-          sessionRateLimits.primary.used_percent,
-          sessionRateLimits.secondary.used_percent,
-          'Session Log'
-        )));
-        return;
-      }
-      // Data is stale (window has reset) — fall through to API
-    }
-  }
-
-  // Step 2: Fallback to API (requires network)
+  // Step 1: Try API first (authoritative for current account)
   try {
     const apiData = await fetchQuotaViaAPI();
     if (apiData && apiData.rate_limit) {
       const rl = apiData.rate_limit;
       const primaryUsed = rl.primary_window ? rl.primary_window.used_percent : 0;
       const secondaryUsed = rl.secondary_window ? rl.secondary_window.used_percent : 0;
+      debugLog('source=api reason=api_success');
       console.log(JSON.stringify(buildOutput(primaryUsed, secondaryUsed, 'API')));
       return;
     }
+    debugLog('source=api reason=api_no_rate_limit');
   } catch {
-    // API failed — fall through
+    debugLog('source=api reason=api_error');
   }
 
-  // Step 3: API failed — use stale session data if we have it (better than nothing)
-  if (sessionRateLimits) {
-    console.log(JSON.stringify(buildOutput(
-      sessionRateLimits.primary.used_percent,
-      sessionRateLimits.secondary.used_percent,
-      'Session Log (stale)'
-    )));
+  // Step 2: API failed — if freshSwitch, output nothing (preserve persisted data)
+  if (freshSwitch) {
+    debugLog('source=none reason=fresh_switch_api_failed');
     return;
   }
 
+  // Step 3: Normal mode — fall back to session log
+  const sessionFile = findLatestSessionFile();
+  if (sessionFile) {
+    const sessionRateLimits = parseSessionFile(sessionFile);
+    if (sessionRateLimits) {
+      const primaryResetsAt = sessionRateLimits.primary.resets_at;
+      const nowSec = Math.floor(Date.now() / 1000);
+      const stale = primaryResetsAt && nowSec >= primaryResetsAt;
+      const source = stale ? 'Session Log (stale)' : 'Session Log';
+      debugLog(`source=session reason=api_unavailable stale=${stale}`);
+      console.log(JSON.stringify(buildOutput(
+        sessionRateLimits.primary.used_percent,
+        sessionRateLimits.secondary.used_percent,
+        source
+      )));
+      return;
+    }
+  }
+
   // Step 4: Nothing available
+  debugLog('source=none reason=no_data');
   console.log(JSON.stringify(buildNoDataOutput('No data available')));
 }
 

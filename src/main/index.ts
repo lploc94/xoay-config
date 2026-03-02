@@ -88,7 +88,7 @@ app.whenReady().then(() => {
   const activeIds = getAllActiveProfileIds()
   for (const profileId of Object.values(activeIds)) {
     if (profileId) {
-      startCronHooks(profileId)
+      startCronHooks(profileId, { trigger: 'startup' })
     }
   }
 

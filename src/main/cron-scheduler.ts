@@ -26,17 +26,31 @@ function intervalKey(profileId: string, hookId: string): string {
   return `${profileId}:${hookId}`
 }
 
+/** Optional switch metadata passed to profile crons on first run. */
+interface CronSwitchMetadata {
+  freshSwitch?: boolean
+  previousProfileId?: string
+  previousProfileName?: string
+  trigger?: 'switch' | 'startup' | 'schedule'
+}
+
 /**
  * Schedule a cron hook into the given tracking structures.
+ *
+ * When `metadata` is provided (profile crons only), the first immediate run
+ * uses those values. Subsequent interval runs default to
+ * `trigger: 'schedule'` / `freshSwitch: false`.
  */
 function scheduleCronHook(
   profileId: string,
   hook: ProfileHook & { type: 'cron' },
   intervals: Map<string, ReturnType<typeof setInterval>>,
   trackedIds: Set<string>,
-  label: string
+  label: string,
+  metadata?: CronSwitchMetadata
 ): void {
   const interval = Math.max(hook.cronIntervalMs ?? 60_000, MIN_INTERVAL_MS)
+  let isFirstRun = true
 
   const runHook = async (): Promise<void> => {
     // Re-check profile is still tracked
@@ -62,8 +76,21 @@ function scheduleCronHook(
       profileId,
       profileName: currentProfile.name,
       hookType: 'cron',
-      profile: currentProfile
+      profile: currentProfile,
+      ...(isFirstRun && metadata
+        ? {
+            freshSwitch: metadata.freshSwitch,
+            previousProfileId: metadata.previousProfileId,
+            previousProfileName: metadata.previousProfileName,
+            trigger: metadata.trigger
+          }
+        : {
+            trigger: 'schedule' as const,
+            freshSwitch: false
+          })
     }
+
+    isFirstRun = false
 
     try {
       const result = await executeHook(hook, context)
@@ -105,8 +132,10 @@ function scheduleCronHook(
  * Start enabled profile cron hooks (non-background) for the given profile.
  * This is additive — it does not stop crons for other profiles.
  * Safe to call multiple times for different profiles.
+ *
+ * @param metadata  Optional switch metadata forwarded to the first cron run.
  */
-export function startCronHooks(profileId: string): void {
+export function startCronHooks(profileId: string, metadata?: CronSwitchMetadata): void {
   // Stop any existing profile crons for THIS profile only (avoid duplicates)
   stopCronHooks(profileId)
 
@@ -130,7 +159,7 @@ export function startCronHooks(profileId: string): void {
   )
 
   for (const hook of cronHooks) {
-    scheduleCronHook(profileId, hook, activeIntervals, activeProfileIds, 'profile')
+    scheduleCronHook(profileId, hook, activeIntervals, activeProfileIds, 'profile', metadata)
   }
 }
 
