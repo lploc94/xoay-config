@@ -1,4 +1,5 @@
-import { utilityProcess, BrowserWindow, Notification } from 'electron'
+import { app, BrowserWindow, Notification } from 'electron'
+import { fork, type ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -16,16 +17,36 @@ import type {
 } from '../shared/types'
 
 const DEFAULT_TIMEOUT = 30_000
-const KILL_GRACE_PERIOD = 5_000
 const SWITCH_COOLDOWN = 30_000
 const MAX_ENV_SIZE = 128 * 1024 // 128KB
+const HEARTBEAT_INTERVAL = 5_000
+
+// ─── Runner state ───
+
+let runner: ChildProcess | null = null
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
+interface PendingRequest {
+  resolve: (result: HookResult) => void
+  hookId: string
+  hookLabel: string
+  timeoutId: ReturnType<typeof setTimeout>
+  contextTempFile?: string
+}
+
+const pendingRequests = new Map<string, PendingRequest>()
 
 let lastSwitchActionTime = 0
 let isSwitching = false
 
 /** Callback for auto-switch actions. Set via setAutoSwitchHandler() to avoid circular imports. */
 let autoSwitchHandler:
-  | ((request: { type: 'switchToProfile' | 'switchToNextProfile'; profileId?: string; triggeringProfileId?: string; triggeredBy: string }) => void)
+  | ((request: {
+      type: 'switchToProfile' | 'switchToNextProfile'
+      profileId?: string
+      triggeringProfileId?: string
+      triggeredBy: string
+    }) => void)
   | null = null
 
 /**
@@ -33,9 +54,7 @@ let autoSwitchHandler:
  * Called by switch-orchestrator at init time to avoid circular imports
  * (hook-executor → switch-orchestrator → hook-executor).
  */
-export function setAutoSwitchHandler(
-  handler: NonNullable<typeof autoSwitchHandler>
-): void {
+export function setAutoSwitchHandler(handler: NonNullable<typeof autoSwitchHandler>): void {
   autoSwitchHandler = handler
 }
 
@@ -44,8 +63,192 @@ export function setIsSwitching(value: boolean): void {
   isSwitching = value
 }
 
+// ─── Runner lifecycle ───
+
 /**
- * Execute a single hook script using Electron's utilityProcess.fork().
+ * Resolve the path to hook-runner.js.
+ * In dev: resources/hooks/hook-runner.js relative to project root.
+ * In production: process.resourcesPath/resources/hooks/hook-runner.js.
+ */
+function getRunnerScriptPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'resources', 'hooks', 'hook-runner.js')
+  }
+  return path.join(__dirname, '../../resources/hooks/hook-runner.js')
+}
+
+function spawnRunner(): void {
+  const scriptPath = getRunnerScriptPath()
+  runner = fork(scriptPath, [], { stdio: 'pipe' })
+
+  runner.on('message', (msg: unknown) => {
+    if (!msg || typeof msg !== 'object') return
+    const m = msg as Record<string, unknown>
+
+    if (m.type === 'ready') {
+      return
+    }
+
+    if (m.type === 'heartbeat-ack') {
+      return
+    }
+
+    if (m.type === 'result') {
+      const id = m.id as string
+      const pending = pendingRequests.get(id)
+      if (!pending) return
+      pendingRequests.delete(id)
+      clearTimeout(pending.timeoutId)
+
+      // Clean up temp context file if used
+      if (pending.contextTempFile) {
+        try {
+          fs.unlinkSync(pending.contextTempFile)
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const stdout = (m.stdout as string) ?? ''
+      const stderr = (m.stderr as string) ?? ''
+      const exitCode = (m.exitCode as number) ?? 1
+      const error = m.error as string | undefined
+      const success = exitCode === 0
+
+      let display: DisplayItem[] | undefined
+      let actions: HookActions | undefined
+      let configUpdates: ConfigUpdate[] | undefined
+
+      // Attempt to parse stdout as JSON for display/actions/configUpdates
+      if (stdout.trim()) {
+        try {
+          const parsed = JSON.parse(stdout.trim())
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.display) {
+              display = normalizeDisplay(parsed.display)
+            }
+            if (parsed.actions) actions = parsed.actions
+            if (Array.isArray(parsed.configUpdates)) {
+              configUpdates = parsed.configUpdates.filter(
+                /* eslint-disable @typescript-eslint/no-explicit-any */
+                (entry: unknown): entry is ConfigUpdate =>
+                  entry != null &&
+                  typeof entry === 'object' &&
+                  typeof (entry as ConfigUpdate).itemId === 'string' &&
+                  ((entry as any).content === undefined ||
+                    typeof (entry as any).content === 'string') &&
+                  ((entry as any).value === undefined || typeof (entry as any).value === 'string')
+                /* eslint-enable @typescript-eslint/no-explicit-any */
+              )
+            }
+          }
+        } catch {
+          // Not valid JSON — ignore, stdout is still captured as raw text
+        }
+      }
+
+      pending.resolve({
+        hookId: pending.hookId,
+        hookLabel: pending.hookLabel,
+        success,
+        error: error ?? (success ? undefined : `Process exited with code ${exitCode}`),
+        stdout,
+        stderr,
+        display,
+        actions,
+        configUpdates
+      })
+      return
+    }
+  })
+
+  runner.on('exit', () => {
+    runner = null
+    stopHeartbeat()
+
+    // Reject all pending requests — runner died
+    for (const [id, pending] of pendingRequests) {
+      pendingRequests.delete(id)
+      clearTimeout(pending.timeoutId)
+      if (pending.contextTempFile) {
+        try {
+          fs.unlinkSync(pending.contextTempFile)
+        } catch {
+          /* ignore */
+        }
+      }
+      pending.resolve({
+        hookId: pending.hookId,
+        hookLabel: pending.hookLabel,
+        success: false,
+        error: 'Hook runner process crashed'
+      })
+    }
+  })
+
+  startHeartbeat()
+}
+
+function startHeartbeat(): void {
+  stopHeartbeat()
+  heartbeatTimer = setInterval(() => {
+    if (runner?.connected) {
+      runner.send({ type: 'heartbeat' })
+    }
+  }, HEARTBEAT_INTERVAL)
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
+}
+
+function ensureRunner(): void {
+  if (!runner || !runner.connected) {
+    spawnRunner()
+  }
+}
+
+/** Initialize the hook runner. Called at app startup. */
+export function initHookRunner(): void {
+  ensureRunner()
+}
+
+/** Shut down the hook runner. Called at app quit. */
+export function shutdownHookRunner(): void {
+  stopHeartbeat()
+  if (runner) {
+    runner.kill()
+    runner = null
+  }
+  // Reject any pending requests
+  for (const [id, pending] of pendingRequests) {
+    pendingRequests.delete(id)
+    clearTimeout(pending.timeoutId)
+    if (pending.contextTempFile) {
+      try {
+        fs.unlinkSync(pending.contextTempFile)
+      } catch {
+        /* ignore */
+      }
+    }
+    pending.resolve({
+      hookId: pending.hookId,
+      hookLabel: pending.hookLabel,
+      success: false,
+      error: 'Hook runner shut down'
+    })
+  }
+}
+
+// ─── Hook execution ───
+
+let requestCounter = 0
+
+/**
+ * Execute a single hook script via the persistent hook runner.
  * Best-effort: failures never throw, only produce a result.
  */
 export async function executeHook(hook: ProfileHook, context: HookContext): Promise<HookResult> {
@@ -79,133 +282,85 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
       }
   const contextJson = JSON.stringify(hookContext)
 
-  // If context exceeds 128KB, write to temp file instead of env var
+  // Build env object: only XOAY_HOOK_CONTEXT or XOAY_HOOK_CONTEXT_FILE
+  // The runner already inherits process.env from spawn time.
   let contextTempFile: string | undefined
-  const hookEnv: Record<string, string> = { ...process.env } as Record<string, string>
+  const env: Record<string, string> = {}
   if (Buffer.byteLength(contextJson, 'utf-8') > MAX_ENV_SIZE) {
     contextTempFile = path.join(os.tmpdir(), `xoay-hook-context-${Date.now()}-${hook.id}.json`)
     fs.writeFileSync(contextTempFile, contextJson, 'utf-8')
-    hookEnv.XOAY_HOOK_CONTEXT_FILE = contextTempFile
+    env.XOAY_HOOK_CONTEXT_FILE = contextTempFile
   } else {
-    hookEnv.XOAY_HOOK_CONTEXT = contextJson
+    env.XOAY_HOOK_CONTEXT = contextJson
   }
 
+  // Ensure runner is alive
+  ensureRunner()
+
+  const id = `hook-${++requestCounter}-${Date.now()}`
+
   return new Promise<HookResult>((resolve) => {
-    let stdoutChunks: Buffer[] = []
-    let stderrChunks: Buffer[] = []
-    let resolved = false
-    let timeoutId: ReturnType<typeof setTimeout> | undefined
-    let killTimeoutId: ReturnType<typeof setTimeout> | undefined
-
-    const finish = (result: HookResult): void => {
-      if (resolved) return
-      resolved = true
-      if (timeoutId) clearTimeout(timeoutId)
-      if (killTimeoutId) clearTimeout(killTimeoutId)
-      // Clean up temp context file if used
-      if (contextTempFile) {
-        try { fs.unlinkSync(contextTempFile) } catch { /* ignore */ }
+    // Timeout: kill runner and reject this request
+    const timeoutId = setTimeout(() => {
+      const pending = pendingRequests.get(id)
+      if (!pending) return
+      pendingRequests.delete(id)
+      if (pending.contextTempFile) {
+        try {
+          fs.unlinkSync(pending.contextTempFile)
+        } catch {
+          /* ignore */
+        }
       }
-      resolve(result)
-    }
-
-    let child: Electron.UtilityProcess
-    try {
-      child = utilityProcess.fork(resolvedPath, [], {
-        env: hookEnv,
-        stdio: 'pipe',
-        serviceName: `hook:${hook.label}`
-      })
-    } catch (err) {
-      finish({
+      // Kill the runner — it will be respawned on next call
+      if (runner) {
+        runner.kill()
+        runner = null
+        stopHeartbeat()
+      }
+      resolve({
         hookId: hook.id,
         hookLabel: hook.label,
         success: false,
-        error: `Failed to spawn process: ${err instanceof Error ? err.message : String(err)}`
+        error: `Hook timed out after ${timeout}ms`
       })
-      return
-    }
-
-    // Capture stdout
-    if (child.stdout) {
-      child.stdout.on('data', (data: Buffer) => {
-        stdoutChunks.push(data)
-      })
-    }
-
-    // Capture stderr
-    if (child.stderr) {
-      child.stderr.on('data', (data: Buffer) => {
-        stderrChunks.push(data)
-      })
-    }
-
-    // Timeout handling: SIGTERM → wait 5s → SIGKILL
-    timeoutId = setTimeout(() => {
-      if (resolved) return
-      child.kill()
-      killTimeoutId = setTimeout(() => {
-        if (resolved) return
-        // Force kill if still alive — kill() again acts as force
-        child.kill()
-        finish({
-          hookId: hook.id,
-          hookLabel: hook.label,
-          success: false,
-          error: `Hook timed out after ${timeout}ms (force killed)`,
-          stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
-          stderr: Buffer.concat(stderrChunks).toString('utf-8')
-        })
-      }, KILL_GRACE_PERIOD)
     }, timeout)
 
-    // Process exit
-    child.on('exit', (code: number) => {
-      const stdout = Buffer.concat(stdoutChunks).toString('utf-8')
-      const stderr = Buffer.concat(stderrChunks).toString('utf-8')
-      const success = code === 0
+    pendingRequests.set(id, {
+      resolve,
+      hookId: hook.id,
+      hookLabel: hook.label,
+      timeoutId,
+      contextTempFile
+    })
 
-      let display: DisplayItem[] | undefined
-      let actions: HookActions | undefined
-      let configUpdates: ConfigUpdate[] | undefined
-
-      // Attempt to parse stdout as JSON for display/actions/configUpdates
-      if (stdout.trim()) {
+    // Send run message to the runner.
+    // env carries XOAY_HOOK_CONTEXT or XOAY_HOOK_CONTEXT_FILE — the runner
+    // applies env into process.env before executing the script.
+    try {
+      runner!.send({
+        type: 'run',
+        id,
+        scriptPath: resolvedPath,
+        env
+      })
+    } catch (err) {
+      pendingRequests.delete(id)
+      clearTimeout(timeoutId)
+      if (contextTempFile) {
         try {
-          const parsed = JSON.parse(stdout.trim())
-          if (parsed && typeof parsed === 'object') {
-            if (parsed.display) {
-              display = normalizeDisplay(parsed.display)
-            }
-            if (parsed.actions) actions = parsed.actions
-            if (Array.isArray(parsed.configUpdates)) {
-              configUpdates = parsed.configUpdates.filter(
-                (entry: unknown): entry is ConfigUpdate =>
-                  entry != null &&
-                  typeof entry === 'object' &&
-                  typeof (entry as ConfigUpdate).itemId === 'string' &&
-                  ((entry as any).content === undefined || typeof (entry as any).content === 'string') &&
-                  ((entry as any).value === undefined || typeof (entry as any).value === 'string')
-              )
-            }
-          }
+          fs.unlinkSync(contextTempFile)
         } catch {
-          // Not valid JSON — ignore, stdout is still captured as raw text
+          /* ignore */
         }
       }
-
-      finish({
+      resolve({
         hookId: hook.id,
         hookLabel: hook.label,
-        success,
-        error: success ? undefined : `Process exited with code ${code}`,
-        stdout,
-        stderr,
-        display,
-        actions,
-        configUpdates
+        success: false,
+        error: `Failed to send to runner: ${err instanceof Error ? err.message : String(err)}`
       })
-    })
+    }
   })
 }
 
@@ -248,10 +403,7 @@ function normalizeDisplay(display: unknown): DisplayItem[] {
  * Detects status transitions (ok→warning, ok→error, warning→error) and fires
  * system notifications to alert the user.
  */
-export function mergeDisplayData(
-  profileId: string,
-  display: DisplayItem[]
-): void {
+export function mergeDisplayData(profileId: string, display: DisplayItem[]): void {
   const allDisplayData = getHookDisplayData()
   const existing = allDisplayData[profileId] ?? []
 
@@ -284,7 +436,11 @@ export function mergeDisplayData(
   store.set('hookDisplayTimestamps', timestamps)
 
   // Push updated display data to all renderer windows in real-time
-  sendToRenderer('hook:display-update', { profileId, displayData: display, updatedAt: timestamps[profileId] })
+  sendToRenderer('hook:display-update', {
+    profileId,
+    displayData: display,
+    updatedAt: timestamps[profileId]
+  })
 
   // Rebuild tray menu so quota info is visible in system tray
   buildTrayMenu()

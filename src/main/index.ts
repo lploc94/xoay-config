@@ -5,9 +5,15 @@ import icon from '../../resources/icon.png?asset'
 import { registerSwitchHandlers } from './switch-handlers'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
-import { startCronHooks, stopCronHooks, startBackgroundCrons, stopAllBackgroundCrons } from './cron-scheduler'
+import {
+  startCronHooks,
+  stopCronHooks,
+  startBackgroundCrons,
+  stopAllBackgroundCrons
+} from './cron-scheduler'
 import { getAllActiveProfileIds, listProfiles } from './storage'
 import { ensureHookDirs, provisionBuiltinHooks } from './hook-storage'
+import { initHookRunner, shutdownHookRunner } from './hook-executor'
 import { runMigrations } from './migration'
 
 function createWindow(): void {
@@ -63,6 +69,9 @@ app.whenReady().then(() => {
   ensureHookDirs()
   provisionBuiltinHooks()
 
+  // Start the persistent hook runner process
+  initHookRunner()
+
   // Run data migrations (must happen before IPC handlers / tray)
   runMigrations()
 
@@ -105,8 +114,9 @@ app.on('window-all-closed', () => {
   }
 })
 
-// Stop cron hooks before app quits
+// Stop cron hooks and hook runner before app quits
 app.on('before-quit', () => {
   stopCronHooks()
   stopAllBackgroundCrons()
+  shutdownHookRunner()
 })
