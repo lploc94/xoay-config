@@ -11,7 +11,8 @@ const store = new Store<AppState>({
     categories: [],
     profiles: [],
     activeProfileIds: {},
-    hookDisplayData: {}
+    hookDisplayData: {},
+    hookDisplayTimestamps: {}
   }
 })
 

@@ -362,4 +362,16 @@ export function registerIpcHandlers(): void {
       }
     }
   )
+
+  ipcMain.handle(
+    IPC_CHANNELS.HOOK_GET_DISPLAY_TIMESTAMPS,
+    (): IpcResponse<Record<string, number>> => {
+      try {
+        const data = (store.get('hookDisplayTimestamps') as Record<string, number>) ?? {}
+        return ok(data)
+      } catch (e) {
+        return fail(String(e))
+      }
+    }
+  )
 }

@@ -236,8 +236,13 @@ export function mergeDisplayData(
   allDisplayData[profileId] = existing
   store.set('hookDisplayData', allDisplayData)
 
+  // Store per-profile timestamp of last successful hook display update
+  const timestamps = (store.get('hookDisplayTimestamps') as Record<string, number>) ?? {}
+  timestamps[profileId] = Date.now()
+  store.set('hookDisplayTimestamps', timestamps)
+
   // Push updated display data to all renderer windows in real-time
-  sendToRenderer('hook:display-update', { profileId, displayData: existing })
+  sendToRenderer('hook:display-update', { profileId, displayData: existing, updatedAt: timestamps[profileId] })
 
   // Rebuild tray menu so quota info is visible in system tray
   buildTrayMenu()

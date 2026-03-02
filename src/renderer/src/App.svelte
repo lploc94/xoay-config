@@ -32,6 +32,7 @@
   let editingHook = $state<ProfileHook | null>(null)
   let hookNotification = $state<{ message: string; hookLabel: string } | null>(null)
   let hookDisplayData = $state<Record<string, Record<string, HookDisplayValue>>>({})
+  let hookDisplayTimestamps = $state<Record<string, number>>({})
 
   const selectedProfile = $derived(profiles.find((p) => p.id === selectedProfileId) ?? null)
   const isSelectedProfileActive = $derived(
@@ -46,18 +47,20 @@
   // ── Data Loading ───────────────────────────────────────────────
   async function loadData(): Promise<void> {
     try {
-      const [p, a, pr, hdd, cats] = await Promise.all([
+      const [p, a, pr, hdd, cats, hdt] = await Promise.all([
         ipc.listProfiles(),
         ipc.getAllActiveProfileIds(),
         ipc.listPresets(),
         ipc.getHookDisplayData(),
-        ipc.listCategories()
+        ipc.listCategories(),
+        ipc.getHookDisplayTimestamps()
       ])
       profiles = p
       activeProfileIds = a
       presets = pr
       hookDisplayData = hdd
       categories = cats
+      hookDisplayTimestamps = hdt
 
       // Select first profile if none selected
       if (!selectedProfileId && profiles.length > 0) {
@@ -88,8 +91,9 @@
       hookNotification = data
     })
     // Listen for real-time hook display data updates
-    const unsubDisplayUpdate = ipc.onHookDisplayUpdate(({ profileId, displayData }) => {
+    const unsubDisplayUpdate = ipc.onHookDisplayUpdate(({ profileId, displayData, updatedAt }) => {
       hookDisplayData = { ...hookDisplayData, [profileId]: displayData }
+      hookDisplayTimestamps = { ...hookDisplayTimestamps, [profileId]: updatedAt }
     })
     return () => {
       unsub()
@@ -312,11 +316,18 @@
   }
 
   // ── Category Actions ────────────────────────────────────────────
-  async function handleAddCategory(): Promise<void> {
-    const name = prompt('New category name:')
-    if (!name?.trim()) return
+  async function handleAddCategory(name: string): Promise<void> {
     try {
-      await ipc.createCategory(name.trim())
+      await ipc.createCategory(name)
+      await loadData()
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  async function handleDeleteCategory(id: string): Promise<void> {
+    try {
+      await ipc.deleteCategory(id)
       await loadData()
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
@@ -408,6 +419,7 @@
       onSelect={(id) => selectedProfileId = id}
       onCreateNew={(categoryId) => { createForCategoryId = categoryId; showCreateDialog = true }}
       onAddCategory={handleAddCategory}
+      onDeleteCategory={handleDeleteCategory}
       onImportPreset={handleImportPreset}
       onExportPreset={handleExportPreset}
     />
@@ -419,6 +431,7 @@
           profile={selectedProfile}
           isActive={isSelectedProfileActive}
           hookDisplayData={selectedProfileDisplayData}
+          lastHookRunAt={selectedProfileId ? (hookDisplayTimestamps[selectedProfileId] ?? null) : null}
           {hookNotification}
           onSwitch={handleSwitch}
           onDelete={handleDeleteProfile}

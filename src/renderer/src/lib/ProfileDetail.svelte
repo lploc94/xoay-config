@@ -11,6 +11,7 @@
     profile: Profile
     isActive: boolean
     hookDisplayData: Record<string, HookDisplayValue>
+    lastHookRunAt: number | null
     hookNotification: { message: string; hookLabel: string } | null
     onSwitch: () => void
     onDelete: () => void
@@ -29,7 +30,7 @@
   }
 
   let {
-    profile, isActive, hookDisplayData, hookNotification,
+    profile, isActive, hookDisplayData, lastHookRunAt, hookNotification,
     onSwitch, onDelete, onAddItem,
     onEditItem, onDeleteItem, onToggleItem, onImportCurrent,
     onRenameProfile, onSync,
@@ -142,16 +143,8 @@
 
   const hookDisplayEntries = $derived(Object.entries(hookDisplayData))
 
-  let lastUpdated = $state<Date | null>(null)
-
-  $effect(() => {
-    if (hookDisplayEntries.length > 0) {
-      lastUpdated = new Date()
-    }
-  })
-
-  function relativeTime(date: Date): string {
-    const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  function relativeTime(epochMs: number): string {
+    const seconds = Math.floor((Date.now() - epochMs) / 1000)
     if (seconds < 10) return 'just now'
     if (seconds < 60) return `${seconds}s ago`
     const minutes = Math.floor(seconds / 60)
@@ -162,9 +155,10 @@
 
   let relativeTimeStr = $state('')
   $effect(() => {
-    if (!lastUpdated) return
-    // Update relative time every 10 seconds
-    const update = () => { relativeTimeStr = relativeTime(lastUpdated!) }
+    if (!lastHookRunAt) return
+    // Capture the value for the interval closure
+    const ts = lastHookRunAt
+    const update = () => { relativeTimeStr = relativeTime(ts) }
     update()
     const interval = setInterval(update, 10_000)
     return () => clearInterval(interval)
@@ -231,7 +225,7 @@
             </div>
           {/each}
         </div>
-        {#if lastUpdated}
+        {#if lastHookRunAt}
           <div class="px-4 py-1.5 border-t border-surface-200-800 flex items-center gap-1 text-xs text-surface-400">
             <ClockIcon class="size-3" />
             <span>Updated {relativeTimeStr}</span>

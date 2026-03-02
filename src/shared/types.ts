@@ -213,6 +213,7 @@ export interface AppState {
   profiles: Profile[]
   activeProfileIds: Record<string, string> // categoryId → profileId
   hookDisplayData: Record<string, Record<string, HookDisplayValue>>
+  hookDisplayTimestamps: Record<string, number> // profileId → last hook-run epoch ms
 }
 
 // ── IPC Contract ─────────────────────────────────────────────────
@@ -254,6 +255,7 @@ export const IPC_CHANNELS = {
   HOOK_SELECT_FILE: 'hook:select-file',
   HOOK_GET_DISPLAY_DATA: 'hook:get-display-data',
   HOOK_LIST_BUILTIN: 'hook:list-builtin',
+  HOOK_GET_DISPLAY_TIMESTAMPS: 'hook:get-display-timestamps',
   PRESET_IMPORT: 'preset:import',
   PRESET_EXPORT: 'preset:export'
 } as const

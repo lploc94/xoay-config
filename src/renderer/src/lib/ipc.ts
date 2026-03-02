@@ -15,7 +15,7 @@ import { IPC_CHANNELS } from '../../../shared/types'
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   // Strip Svelte 5 reactive proxies — IPC structured clone cannot handle them
-  const plainArgs = args.map(a => JSON.parse(JSON.stringify(a)))
+  const plainArgs = args.filter(a => a !== undefined).map(a => JSON.parse(JSON.stringify(a)))
   const resp: IpcResponse<T> = await window.electron.ipcRenderer.invoke(channel, ...plainArgs)
   if (!resp.success) {
     throw new Error(resp.error ?? 'Unknown error')
@@ -81,6 +81,8 @@ export const getHookDisplayData = () =>
   invoke<Record<string, Record<string, HookDisplayValue>>>(IPC_CHANNELS.HOOK_GET_DISPLAY_DATA)
 export const listBuiltinHooks = () =>
   invoke<BuiltinHookInfo[]>(IPC_CHANNELS.HOOK_LIST_BUILTIN)
+export const getHookDisplayTimestamps = () =>
+  invoke<Record<string, number>>(IPC_CHANNELS.HOOK_GET_DISPLAY_TIMESTAMPS)
 
 // ── Events from main ────────────────────────────────────────
 export function onProfileSwitched(callback: (result: SwitchResult) => void): () => void {
@@ -93,8 +95,8 @@ export function onProfileSwitched(callback: (result: SwitchResult) => void): () 
   }
 }
 
-export function onHookDisplayUpdate(callback: (data: { profileId: string; displayData: Record<string, HookDisplayValue> }) => void): () => void {
-  const handler = (_event: unknown, data: { profileId: string; displayData: Record<string, HookDisplayValue> }): void => {
+export function onHookDisplayUpdate(callback: (data: { profileId: string; displayData: Record<string, HookDisplayValue>; updatedAt: number }) => void): () => void {
+  const handler = (_event: unknown, data: { profileId: string; displayData: Record<string, HookDisplayValue>; updatedAt: number }): void => {
     callback(data)
   }
   window.electron.ipcRenderer.on('hook:display-update', handler)
