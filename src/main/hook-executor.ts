@@ -199,8 +199,7 @@ function ensureRunner(): void {
 
 /** Initialize the hook runner. Called at app startup. */
 export function initHookRunner(): void {
-  // Runner is lazy-spawned on first executeHook() call — this is a no-op hook
-  // for the app lifecycle to call. It ensures shutdown is paired.
+  ensureRunner()
 }
 
 /** Shut down the hook runner. Called at app quit. */
