@@ -1,7 +1,7 @@
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
 import type { AppState, Profile, Category, ConfigItem, CreateProfileReq, DisplayItem, ConfigUpdate } from '../shared/types'
-import { getPresetById, getBuiltInHooks } from './preset-loader'
+import { getPresetById, getBuiltInHooks, presetHooksToProfileHooks } from './preset-loader'
 import { stopCronHooks, stopBackgroundCrons } from './cron-scheduler'
 
 const store = new Store<AppState>({
@@ -98,6 +98,7 @@ export function getProfile(id: string): Profile | null {
 
 export function createProfile(req: CreateProfileReq): Profile {
   let items: ConfigItem[] = req.items ?? []
+  let presetHooks: import('../shared/types').ProfileHook[] = []
 
   // Only use preset defaults when caller didn't supply items
   if (req.presetId && items.length === 0) {
@@ -108,6 +109,10 @@ export function createProfile(req: CreateProfileReq): Profile {
         ...item,
         id: randomUUID()
       }))
+      // Convert preset hook definitions to profile hooks
+      if (preset.hooks && preset.hooks.length > 0) {
+        presetHooks = presetHooksToProfileHooks(req.presetId, preset.hooks)
+      }
     }
   }
 
@@ -118,7 +123,7 @@ export function createProfile(req: CreateProfileReq): Profile {
     categoryId: req.categoryId,
     presetId: req.presetId,
     items,
-    hooks: getBuiltInHooks(),
+    hooks: [...getBuiltInHooks(), ...presetHooks],
     createdAt: now,
     updatedAt: now
   }
