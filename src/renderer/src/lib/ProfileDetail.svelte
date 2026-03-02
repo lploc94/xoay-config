@@ -5,12 +5,13 @@
     CheckIcon, XIcon, RefreshCwIcon, AnchorIcon,
     ZapIcon, ClockIcon
   } from '@lucide/svelte'
-  import type { Profile, ConfigItem, ProfileHook, SyncResult, HookDisplayValue } from '../../../shared/types'
+  import type { Profile, ConfigItem, ProfileHook, SyncResult, DisplayItem } from '../../../shared/types'
+  import DOMPurify from 'dompurify'
 
   interface Props {
     profile: Profile
     isActive: boolean
-    hookDisplayData: Record<string, HookDisplayValue>
+    hookDisplayData: DisplayItem[]
     lastHookRunAt: number | null
     hookNotification: { message: string; hookLabel: string } | null
     onSwitch: () => void
@@ -141,7 +142,30 @@
     return groups
   })
 
-  const hookDisplayEntries = $derived(Object.entries(hookDisplayData))
+  function displayStatusColor(status?: 'ok' | 'warning' | 'error'): string {
+    if (status === 'warning') return 'text-warning-400'
+    if (status === 'error') return 'text-error-400'
+    return 'text-success-400'
+  }
+
+  function displayStatusBorder(status?: 'ok' | 'warning' | 'error'): string {
+    if (status === 'warning') return 'border-warning-500/40'
+    if (status === 'error') return 'border-error-500/40'
+    return 'border-success-500/40'
+  }
+
+  function displayStatusDot(status?: 'ok' | 'warning' | 'error'): string {
+    if (status === 'warning') return 'bg-warning-500'
+    if (status === 'error') return 'bg-error-500'
+    return 'bg-success-500'
+  }
+
+  function percentageWidth(value: string | number | null, max?: number): number {
+    const num = typeof value === 'number' ? value : parseFloat(String(value ?? '0'))
+    const total = max ?? 100
+    if (total <= 0) return 0
+    return Math.min(100, Math.max(0, (num / total) * 100))
+  }
 
   function relativeTime(epochMs: number): string {
     const seconds = Math.floor((Date.now() - epochMs) / 1000)
@@ -163,12 +187,6 @@
     const interval = setInterval(update, 10_000)
     return () => clearInterval(interval)
   })
-
-  function displayStatusBorder(status?: 'ok' | 'warning' | 'error'): string {
-    if (status === 'warning') return 'border-warning-500/40'
-    if (status === 'error') return 'border-error-500/40'
-    return 'border-success-500/40'
-  }
 </script>
 
 <div class="flex flex-col h-full">
@@ -215,13 +233,50 @@
   <!-- Config Items -->
   <div class="flex-1 overflow-y-auto p-5 space-y-4">
     <!-- Status Card -->
-    {#if hookDisplayEntries.length > 0}
+    {#if hookDisplayData.length > 0}
       <div class="rounded-lg border border-surface-200-800 bg-surface-100-900 overflow-hidden">
-        <div class="grid gap-px bg-surface-200-800" style="grid-template-columns: repeat({Math.min(hookDisplayEntries.length, 3)}, 1fr);">
-          {#each hookDisplayEntries as [key, val]}
-            <div class="px-4 py-3 bg-surface-50-950 border-l-2 {displayStatusBorder(val.status)}">
-              <p class="text-lg font-bold {val.status === 'warning' ? 'text-warning-400' : val.status === 'error' ? 'text-error-400' : 'text-success-400'}">{val.value}</p>
-              <p class="text-xs text-surface-400 mt-0.5">{val.label ?? key}</p>
+        <div class="grid gap-px bg-surface-200-800" style="grid-template-columns: repeat(3, 1fr);">
+          {#each hookDisplayData as item}
+            <div class="px-4 py-3 bg-surface-50-950 border-l-2 {displayStatusBorder(item.status)}" style="{item.span === 'full' ? 'grid-column: 1 / -1;' : item.span === 2 ? 'grid-column: span 2;' : item.span === 3 ? 'grid-column: span 3;' : ''}">
+              {#if item.type === 'text'}
+                <p class="text-lg font-bold {displayStatusColor(item.status)}">{item.value ?? ''}</p>
+                <p class="text-xs text-surface-400 mt-0.5">{item.label}</p>
+              {:else if item.type === 'number'}
+                <p class="text-2xl font-bold {displayStatusColor(item.status)}">{item.value ?? 0}</p>
+                <p class="text-xs text-surface-400 mt-0.5">{item.label}</p>
+              {:else if item.type === 'percentage'}
+                {@const pct = percentageWidth(item.value, item.max)}
+                <div class="flex items-center justify-between mb-1">
+                  <p class="text-xs text-surface-400">{item.label}</p>
+                  <p class="text-xs font-medium {displayStatusColor(item.status)}">{Math.round(pct)}%</p>
+                </div>
+                <div class="w-full h-2 rounded-full bg-surface-300/30 overflow-hidden">
+                  <div class="h-full rounded-full transition-all {item.status === 'error' ? 'bg-error-500' : item.status === 'warning' ? 'bg-warning-500' : 'bg-success-500'}" style="width: {pct}%"></div>
+                </div>
+              {:else if item.type === 'status'}
+                <div class="flex items-center gap-2">
+                  <span class="size-2.5 rounded-full shrink-0 {displayStatusDot(item.status)}"></span>
+                  <p class="text-sm font-medium">{item.value ?? ''}</p>
+                </div>
+                <p class="text-xs text-surface-400 mt-0.5 pl-[18px]">{item.label}</p>
+              {:else if item.type === 'key-value'}
+                <p class="text-xs text-surface-400 mb-1.5">{item.label}</p>
+                {#if item.entries}
+                  <div class="space-y-0.5">
+                    {#each Object.entries(item.entries) as [k, v]}
+                      <div class="flex items-center justify-between text-xs">
+                        <span class="text-surface-400">{k}</span>
+                        <span class="font-medium">{v}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              {:else if item.type === 'html'}
+                <p class="text-xs text-surface-400 mb-1">{item.label}</p>
+                <div class="text-sm">
+                  {@html DOMPurify.sanitize(String(item.value ?? ''))}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>

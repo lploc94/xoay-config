@@ -1,13 +1,13 @@
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
-import type { AppState, Profile, Category, ConfigItem, CreateProfileReq } from '../shared/types'
+import type { AppState, Profile, Category, ConfigItem, CreateProfileReq, DisplayItem } from '../shared/types'
 import { getPresetById } from './preset-loader'
-import { stopCronHooks } from './cron-scheduler'
+import { stopCronHooks, stopBackgroundCrons } from './cron-scheduler'
 
 const store = new Store<AppState>({
   name: 'xoay-config',
   defaults: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     categories: [],
     profiles: [],
     activeProfileIds: {},
@@ -15,6 +15,53 @@ const store = new Store<AppState>({
     hookDisplayTimestamps: {}
   }
 })
+
+// ── Schema Migration ─────────────────────────────────────────────
+
+/**
+ * Migrate hookDisplayData from old format Record<string, Record<string, HookDisplayValue>>
+ * to new format Record<string, DisplayItem[]>.
+ */
+function migrateHookDisplayData(): void {
+  const raw = store.get('hookDisplayData') as Record<string, unknown> ?? {}
+  let changed = false
+
+  for (const [profileId, value] of Object.entries(raw)) {
+    if (Array.isArray(value)) continue // already new format
+
+    // Old format: Record<string, { value, label?, status? }>
+    if (value && typeof value === 'object') {
+      const items: DisplayItem[] = []
+      for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+        if (val && typeof val === 'object') {
+          const v = val as { value?: string | null; label?: string; status?: 'ok' | 'warning' | 'error' }
+          items.push({
+            type: 'text',
+            label: v.label ?? key,
+            value: v.value ?? null,
+            status: v.status
+          })
+        }
+      }
+      ;(raw as Record<string, unknown>)[profileId] = items
+      changed = true
+    }
+  }
+
+  if (changed) {
+    store.set('hookDisplayData', raw as Record<string, DisplayItem[]>)
+  }
+}
+
+function migrateStore(): void {
+  const version = store.get('schemaVersion') ?? 1
+  if (version < 2) {
+    migrateHookDisplayData()
+    store.set('schemaVersion', 2)
+  }
+}
+
+migrateStore()
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -99,6 +146,11 @@ export function deleteProfile(id: string): void {
   if (!profile) {
     throw new Error(`Profile not found: ${id}`)
   }
+
+  // Stop all crons (profile + background) before deleting
+  stopCronHooks(id)
+  stopBackgroundCrons(id)
+
   store.set(
     'profiles',
     profiles.filter((p) => p.id !== id)
@@ -176,14 +228,15 @@ export function deleteCategory(id: string): void {
     throw new Error(`Category not found: ${id}`)
   }
 
-  // 1. Stop cron hooks for the active profile in this category
-  const activeIds = store.get('activeProfileIds')
-  const activeProfileId = activeIds[id]
-  if (activeProfileId) {
-    stopCronHooks(activeProfileId)
+  // 1. Stop cron hooks for ALL profiles in this category (profile + background)
+  const categoryProfiles = store.get('profiles').filter((p) => p.categoryId === id)
+  for (const p of categoryProfiles) {
+    stopCronHooks(p.id)
+    stopBackgroundCrons(p.id)
   }
 
   // 2. Remove activeProfileIds entry for this category
+  const activeIds = store.get('activeProfileIds')
   const { [id]: _, ...restActiveIds } = activeIds
   store.set('activeProfileIds', restActiveIds)
 
@@ -195,6 +248,26 @@ export function deleteCategory(id: string): void {
 
   // 4. Remove the category
   store.set('categories', filtered)
+}
+
+// ── Hook Display Data ────────────────────────────────────────────
+
+/**
+ * Safely read hookDisplayData from store, ensuring new DisplayItem[] format.
+ * All read sites should use this instead of casting store.get('hookDisplayData') directly.
+ */
+export function getHookDisplayData(): Record<string, DisplayItem[]> {
+  const raw = store.get('hookDisplayData') as Record<string, unknown> ?? {}
+  const result: Record<string, DisplayItem[]> = {}
+
+  for (const [profileId, value] of Object.entries(raw)) {
+    if (Array.isArray(value)) {
+      result[profileId] = value as DisplayItem[]
+    }
+    // Skip non-array entries (shouldn't happen after migration, but defensive)
+  }
+
+  return result
 }
 
 // ── Backups ──────────────────────────────────────────────────────

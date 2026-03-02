@@ -1,6 +1,5 @@
 import { Tray, Menu, nativeImage, BrowserWindow, app } from 'electron'
-import { listProfiles, getActiveProfileId, getProfile, listCategories, store } from './storage'
-import type { HookDisplayValue } from '../shared/types'
+import { listProfiles, getActiveProfileId, getProfile, listCategories, getHookDisplayData } from './storage'
 import { orchestrateSwitch } from './switch-orchestrator'
 import trayIconPath from '../../resources/trayTemplate.png?asset'
 
@@ -35,18 +34,17 @@ export function buildTrayMenu(): void {
     if (profiles.length === 0) continue
 
     const activeId = getActiveProfileId(category.id)
-    const hookDisplayData =
-      (store.get('hookDisplayData') as Record<string, Record<string, HookDisplayValue>>) ?? {}
+    const hookDisplayData = getHookDisplayData()
 
     const submenu: Electron.MenuItemConstructorOptions[] = profiles.map((p) => {
       let label = p.name
       if (p.id === activeId) {
         const profileDisplay = hookDisplayData[p.id]
-        if (profileDisplay) {
-          const firstValue = Object.values(profileDisplay)[0]
-          if (firstValue?.value) {
-            const prefix = firstValue.status === 'warning' || firstValue.status === 'error' ? '⚠ ' : ''
-            label = `${p.name} (${prefix}${firstValue.value})`
+        if (profileDisplay && profileDisplay.length > 0) {
+          const firstItem = profileDisplay[0]
+          if (firstItem?.value != null) {
+            const prefix = firstItem.status === 'warning' || firstItem.status === 'error' ? '⚠ ' : ''
+            label = `${p.name} (${prefix}${firstItem.value})`
           }
         }
       }

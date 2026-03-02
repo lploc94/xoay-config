@@ -1,6 +1,6 @@
 import { ipcMain, dialog } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
-import type { IpcResponse, Profile, Category, CreateProfileReq, ConfigItem, Preset, SyncResult, ProfileHook, HookDisplayValue, BuiltinHookInfo } from '../shared/types'
+import type { IpcResponse, Profile, Category, CreateProfileReq, ConfigItem, Preset, SyncResult, ProfileHook, DisplayItem, BuiltinHookInfo } from '../shared/types'
 import {
   listProfiles,
   getProfile,
@@ -12,7 +12,8 @@ import {
   createCategory,
   updateCategory,
   deleteCategory,
-  store
+  store,
+  getHookDisplayData
 } from './storage'
 import { getAllPresets, getPresetById } from './presets'
 import { importPresetFile, exportPreset } from './preset-loader'
@@ -342,10 +343,9 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.HOOK_GET_DISPLAY_DATA,
-    (): IpcResponse<Record<string, Record<string, HookDisplayValue>>> => {
+    (): IpcResponse<Record<string, DisplayItem[]>> => {
       try {
-        const data = (store.get('hookDisplayData') as Record<string, Record<string, HookDisplayValue>>) ?? {}
-        return ok(data)
+        return ok(getHookDisplayData())
       } catch (e) {
         return fail(String(e))
       }

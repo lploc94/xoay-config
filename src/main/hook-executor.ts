@@ -2,7 +2,7 @@ import { utilityProcess, BrowserWindow, Notification } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { store, getProfile } from './storage'
+import { store, getProfile, getHookDisplayData } from './storage'
 import { resolveHookPath } from './hook-storage'
 import { buildTrayMenu } from './tray'
 import type {
@@ -10,7 +10,8 @@ import type {
   HookContext,
   HookResult,
   HookDisplayValue,
-  HookActions
+  HookActions,
+  DisplayItem
 } from '../shared/types'
 
 const DEFAULT_TIMEOUT = 30_000
@@ -160,7 +161,7 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
       const stderr = Buffer.concat(stderrChunks).toString('utf-8')
       const success = code === 0
 
-      let display: Record<string, HookDisplayValue> | undefined
+      let display: DisplayItem[] | undefined
       let actions: HookActions | undefined
 
       // Attempt to parse stdout as JSON for display/actions
@@ -168,7 +169,9 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
         try {
           const parsed = JSON.parse(stdout.trim())
           if (parsed && typeof parsed === 'object') {
-            if (parsed.display) display = parsed.display
+            if (parsed.display) {
+              display = normalizeDisplay(parsed.display)
+            }
             if (parsed.actions) actions = parsed.actions
           }
         } catch {
@@ -191,49 +194,72 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
 }
 
 /**
+ * Normalize display data: detect old Record<string, HookDisplayValue> format
+ * and convert to DisplayItem[]. If already an array, use as-is.
+ */
+function normalizeDisplay(display: unknown): DisplayItem[] {
+  // New format: already an array — filter to valid items only
+  if (Array.isArray(display)) {
+    return display.filter(
+      (item): item is DisplayItem =>
+        item != null && typeof item === 'object' && typeof item.type === 'string'
+    )
+  }
+
+  // Old format: Record<string, HookDisplayValue> — object with values that don't have `type` field
+  if (display && typeof display === 'object') {
+    const items: DisplayItem[] = []
+    for (const [key, val] of Object.entries(display as Record<string, HookDisplayValue>)) {
+      if (val && typeof val === 'object') {
+        items.push({
+          type: 'text',
+          label: val.label ?? key,
+          value: val.value,
+          status: val.status
+        })
+      }
+    }
+    return items
+  }
+
+  return []
+}
+
+/**
  * Merge display data from hook results into AppState.hookDisplayData[profileId].
- * Merge semantics: only fields present in output are updated; missing fields are NOT cleared;
- * fields with null value are explicitly cleared.
+ * New format: replaces the entire DisplayItem[] per profile.
  *
  * Detects status transitions (ok→warning, ok→error, warning→error) and fires
  * system notifications to alert the user.
  */
 export function mergeDisplayData(
   profileId: string,
-  display: Record<string, HookDisplayValue>
+  display: DisplayItem[]
 ): void {
-  const allDisplayData =
-    (store.get('hookDisplayData') as Record<string, Record<string, HookDisplayValue>>) ?? {}
-  const existing = allDisplayData[profileId] ?? {}
+  const allDisplayData = getHookDisplayData()
+  const existing = allDisplayData[profileId] ?? []
 
-  // Detect status transitions before merging
+  // Detect status transitions before replacing
   const profile = getProfile(profileId)
   const profileName = profile?.name ?? profileId
 
-  for (const [key, value] of Object.entries(display)) {
-    // Check for status degradation transitions before applying merge
-    if (value && value.value !== null && value.status) {
-      const oldStatus = existing[key]?.status ?? 'ok'
-      const newStatus = value.status
+  for (const item of display) {
+    if (item.value !== null && item.status) {
+      // Find matching old item by label for transition detection
+      const oldItem = existing.find((e) => e.label === item.label)
+      const oldStatus = oldItem?.status ?? 'ok'
+      const newStatus = item.status
       const isDegraded =
         (oldStatus === 'ok' && (newStatus === 'warning' || newStatus === 'error')) ||
         (oldStatus === 'warning' && newStatus === 'error')
 
       if (isDegraded) {
-        const label = value.label ?? key
-        showSystemNotification('Xoay', `${profileName} ${label} dropped to ${value.value}`)
+        showSystemNotification('Xoay', `${profileName} ${item.label} dropped to ${item.value}`)
       }
-    }
-
-    // Apply merge
-    if (value === null || value.value === null) {
-      delete existing[key]
-    } else {
-      existing[key] = value
     }
   }
 
-  allDisplayData[profileId] = existing
+  allDisplayData[profileId] = display
   store.set('hookDisplayData', allDisplayData)
 
   // Store per-profile timestamp of last successful hook display update
@@ -242,7 +268,7 @@ export function mergeDisplayData(
   store.set('hookDisplayTimestamps', timestamps)
 
   // Push updated display data to all renderer windows in real-time
-  sendToRenderer('hook:display-update', { profileId, displayData: existing, updatedAt: timestamps[profileId] })
+  sendToRenderer('hook:display-update', { profileId, displayData: display, updatedAt: timestamps[profileId] })
 
   // Rebuild tray menu so quota info is visible in system tray
   buildTrayMenu()
