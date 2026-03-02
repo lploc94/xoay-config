@@ -100,16 +100,17 @@ export function createProfile(req: CreateProfileReq): Profile {
   let items: ConfigItem[] = req.items ?? []
   let presetHooks: import('../shared/types').ProfileHook[] = []
 
-  // Only use preset defaults when caller didn't supply items
-  if (req.presetId && items.length === 0) {
+  if (req.presetId) {
     const preset = getPresetById(req.presetId)
     if (preset) {
-      // Deep-clone preset items and assign new IDs
-      items = preset.defaultItems.map((item) => ({
-        ...item,
-        id: randomUUID()
-      }))
-      // Convert preset hook definitions to profile hooks
+      // Only use preset default items when caller didn't supply items
+      if (items.length === 0) {
+        items = preset.defaultItems.map((item) => ({
+          ...item,
+          id: randomUUID()
+        }))
+      }
+      // Always merge preset hooks (including converted run-command hooks)
       if (preset.hooks && preset.hooks.length > 0) {
         presetHooks = presetHooksToProfileHooks(req.presetId, preset.hooks)
       }

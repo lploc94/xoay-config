@@ -165,19 +165,29 @@ function ensureRunCommandScript(presetId: string, item: { label?: string; comman
 /**
  * Convert preset hook definitions to runtime ProfileHook objects.
  * Resolves scriptFile to scriptPath based on where the script exists on disk:
- * - `<presetId>/<scriptFile>` for regular preset hooks (extracted during import)
+ * - `<presetId>/<scriptFile>` for preset hooks extracted during import
+ * - `builtin/<scriptFile>` for scripts provisioned into the builtin hooks dir
  * - `<scriptFile>` for run-command converted hooks (at hooks root)
  */
 export function presetHooksToProfileHooks(presetId: string, hookDefs: PresetHookDef[]): ProfileHook[] {
   return hookDefs.map((def) => {
+    let scriptPath = def.scriptFile
+
     const nestedPath = path.join(presetId, def.scriptFile)
-    const nestedExists = fs.existsSync(path.join(PATHS.hooks, nestedPath))
+    const builtinPath = path.join('builtin', def.scriptFile)
+
+    if (fs.existsSync(path.join(PATHS.hooks, nestedPath))) {
+      scriptPath = nestedPath
+    } else if (fs.existsSync(path.join(PATHS.hooks, builtinPath))) {
+      scriptPath = builtinPath
+    }
+
     return {
       id: randomUUID(),
       label: def.label,
       enabled: true,
       type: def.type,
-      scriptPath: nestedExists ? nestedPath : def.scriptFile,
+      scriptPath,
       cronIntervalMs: def.cronIntervalMs,
       timeout: def.timeout
     }
