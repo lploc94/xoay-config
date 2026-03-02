@@ -41,7 +41,12 @@ let isSwitching = false
 
 /** Callback for auto-switch actions. Set via setAutoSwitchHandler() to avoid circular imports. */
 let autoSwitchHandler:
-  | ((request: { type: 'switchToProfile' | 'switchToNextProfile'; profileId?: string; triggeringProfileId?: string; triggeredBy: string }) => void)
+  | ((request: {
+      type: 'switchToProfile' | 'switchToNextProfile'
+      profileId?: string
+      triggeringProfileId?: string
+      triggeredBy: string
+    }) => void)
   | null = null
 
 /**
@@ -49,9 +54,7 @@ let autoSwitchHandler:
  * Called by switch-orchestrator at init time to avoid circular imports
  * (hook-executor → switch-orchestrator → hook-executor).
  */
-export function setAutoSwitchHandler(
-  handler: NonNullable<typeof autoSwitchHandler>
-): void {
+export function setAutoSwitchHandler(handler: NonNullable<typeof autoSwitchHandler>): void {
   autoSwitchHandler = handler
 }
 
@@ -99,7 +102,11 @@ function spawnRunner(): void {
 
       // Clean up temp context file if used
       if (pending.contextTempFile) {
-        try { fs.unlinkSync(pending.contextTempFile) } catch { /* ignore */ }
+        try {
+          fs.unlinkSync(pending.contextTempFile)
+        } catch {
+          /* ignore */
+        }
       }
 
       const stdout = (m.stdout as string) ?? ''
@@ -123,12 +130,15 @@ function spawnRunner(): void {
             if (parsed.actions) actions = parsed.actions
             if (Array.isArray(parsed.configUpdates)) {
               configUpdates = parsed.configUpdates.filter(
+                /* eslint-disable @typescript-eslint/no-explicit-any */
                 (entry: unknown): entry is ConfigUpdate =>
                   entry != null &&
                   typeof entry === 'object' &&
                   typeof (entry as ConfigUpdate).itemId === 'string' &&
-                  ((entry as any).content === undefined || typeof (entry as any).content === 'string') &&
+                  ((entry as any).content === undefined ||
+                    typeof (entry as any).content === 'string') &&
                   ((entry as any).value === undefined || typeof (entry as any).value === 'string')
+                /* eslint-enable @typescript-eslint/no-explicit-any */
               )
             }
           }
@@ -161,7 +171,11 @@ function spawnRunner(): void {
       pendingRequests.delete(id)
       clearTimeout(pending.timeoutId)
       if (pending.contextTempFile) {
-        try { fs.unlinkSync(pending.contextTempFile) } catch { /* ignore */ }
+        try {
+          fs.unlinkSync(pending.contextTempFile)
+        } catch {
+          /* ignore */
+        }
       }
       pending.resolve({
         hookId: pending.hookId,
@@ -214,7 +228,11 @@ export function shutdownHookRunner(): void {
     pendingRequests.delete(id)
     clearTimeout(pending.timeoutId)
     if (pending.contextTempFile) {
-      try { fs.unlinkSync(pending.contextTempFile) } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(pending.contextTempFile)
+      } catch {
+        /* ignore */
+      }
     }
     pending.resolve({
       hookId: pending.hookId,
@@ -288,7 +306,11 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
       if (!pending) return
       pendingRequests.delete(id)
       if (pending.contextTempFile) {
-        try { fs.unlinkSync(pending.contextTempFile) } catch { /* ignore */ }
+        try {
+          fs.unlinkSync(pending.contextTempFile)
+        } catch {
+          /* ignore */
+        }
       }
       // Kill the runner — it will be respawned on next call
       if (runner) {
@@ -326,7 +348,11 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
       pendingRequests.delete(id)
       clearTimeout(timeoutId)
       if (contextTempFile) {
-        try { fs.unlinkSync(contextTempFile) } catch { /* ignore */ }
+        try {
+          fs.unlinkSync(contextTempFile)
+        } catch {
+          /* ignore */
+        }
       }
       resolve({
         hookId: hook.id,
@@ -377,10 +403,7 @@ function normalizeDisplay(display: unknown): DisplayItem[] {
  * Detects status transitions (ok→warning, ok→error, warning→error) and fires
  * system notifications to alert the user.
  */
-export function mergeDisplayData(
-  profileId: string,
-  display: DisplayItem[]
-): void {
+export function mergeDisplayData(profileId: string, display: DisplayItem[]): void {
   const allDisplayData = getHookDisplayData()
   const existing = allDisplayData[profileId] ?? []
 
@@ -413,7 +436,11 @@ export function mergeDisplayData(
   store.set('hookDisplayTimestamps', timestamps)
 
   // Push updated display data to all renderer windows in real-time
-  sendToRenderer('hook:display-update', { profileId, displayData: display, updatedAt: timestamps[profileId] })
+  sendToRenderer('hook:display-update', {
+    profileId,
+    displayData: display,
+    updatedAt: timestamps[profileId]
+  })
 
   // Rebuild tray menu so quota info is visible in system tray
   buildTrayMenu()
