@@ -64,17 +64,20 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
 
   const timeout = hook.timeout ?? DEFAULT_TIMEOUT
 
-  // Prepare context JSON: strip file-replace content to reduce size
-  const strippedContext: HookContext = {
-    ...context,
-    profile: {
-      ...context.profile,
-      items: context.profile.items.map((item) =>
-        item.type === 'file-replace' ? { ...item, content: '<stripped>' } : item
-      )
-    }
-  }
-  const contextJson = JSON.stringify(strippedContext)
+  // Prepare context JSON: strip file-replace content to reduce size for non-builtIn hooks.
+  // Built-in hooks (e.g. sync-config) need the real content to detect changes on disk.
+  const hookContext: HookContext = hook.builtIn
+    ? context
+    : {
+        ...context,
+        profile: {
+          ...context.profile,
+          items: context.profile.items.map((item) =>
+            item.type === 'file-replace' ? { ...item, content: '<stripped>' } : item
+          )
+        }
+      }
+  const contextJson = JSON.stringify(hookContext)
 
   // If context exceeds 128KB, write to temp file instead of env var
   let contextTempFile: string | undefined
@@ -175,7 +178,16 @@ export async function executeHook(hook: ProfileHook, context: HookContext): Prom
               display = normalizeDisplay(parsed.display)
             }
             if (parsed.actions) actions = parsed.actions
-            if (Array.isArray(parsed.configUpdates)) configUpdates = parsed.configUpdates
+            if (Array.isArray(parsed.configUpdates)) {
+              configUpdates = parsed.configUpdates.filter(
+                (entry: unknown): entry is ConfigUpdate =>
+                  entry != null &&
+                  typeof entry === 'object' &&
+                  typeof (entry as ConfigUpdate).itemId === 'string' &&
+                  ((entry as any).content === undefined || typeof (entry as any).content === 'string') &&
+                  ((entry as any).value === undefined || typeof (entry as any).value === 'string')
+              )
+            }
           }
         } catch {
           // Not valid JSON — ignore, stdout is still captured as raw text

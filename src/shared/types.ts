@@ -134,13 +134,16 @@ export interface Preset {
 // ── Preset File Format (.xoay-preset.json) ───────────────────────
 
 export interface PresetDefaultItem {
-  type: 'file-replace' | 'env-var'
+  type: 'file-replace' | 'env-var' | 'run-command'
   label: string
   enabled: boolean
   targetPath?: string   // file-replace
   name?: string         // env-var
   value?: string        // env-var
   shellFile?: string    // env-var
+  command?: string      // run-command (legacy)
+  workingDir?: string   // run-command (legacy)
+  timeout?: number      // run-command (legacy)
 }
 
 export interface PresetHookDef {

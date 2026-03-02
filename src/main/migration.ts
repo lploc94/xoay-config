@@ -128,18 +128,21 @@ function migrateV2toV3(): void {
       const scriptPath = path.join(hooksDir, scriptName)
       const lines = [
         `// Auto-migrated from run-command item: ${item.label ?? ''}`,
+        `const os = require('os');`,
         `const { execSync } = require('child_process');`,
+        `let cwd = ${JSON.stringify(workingDir)} || os.homedir();`,
+        `if (cwd.startsWith('~')) cwd = os.homedir() + cwd.slice(1);`,
         `try {`,
         `  execSync(${JSON.stringify(command)}, {`,
+        `    cwd,`,
         `    stdio: 'inherit',`,
-        workingDir ? `    cwd: ${JSON.stringify(workingDir)},` : '',
         `    timeout: ${timeout}`,
         `  });`,
         `} catch (e) {`,
         `  console.error('Migration hook failed:', e.message);`,
         `  process.exit(1);`,
         `}`
-      ].filter(Boolean).join('\n')
+      ].join('\n')
 
       fs.writeFileSync(scriptPath, lines, 'utf-8')
 
