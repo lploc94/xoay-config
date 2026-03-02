@@ -1,6 +1,5 @@
 <script lang="ts">
   import { ChevronRightIcon, PlusIcon, UserIcon, FolderIcon, ImportIcon, DownloadIcon, Trash2Icon } from '@lucide/svelte'
-  import { Collapsible } from '@skeletonlabs/skeleton-svelte'
   import type { Profile, Category, Preset, HookDisplayValue } from '../../../shared/types'
 
   interface Props {
@@ -52,6 +51,24 @@
     error: 'bg-error-500'
   }
 
+  let openCategories = $state(new Set<string>(categories.map(c => c.id)))
+
+  function toggleCategory(id: string): void {
+    const next = new Set(openCategories)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    openCategories = next
+  }
+
+  $effect(() => {
+    const missing = categories.filter(c => !openCategories.has(c.id))
+    if (missing.length > 0) {
+      const next = new Set(openCategories)
+      for (const cat of missing) next.add(cat.id)
+      openCategories = next
+    }
+  })
+
   let addingCategory = $state(false)
   let newCategoryName = $state('')
   let deletingCategoryId = $state<string | null>(null)
@@ -82,8 +99,7 @@
     {#each categories as category (category.id)}
       {@const catProfiles = profilesForCategory(category.id)}
       {@const activeName = activeProfileName(category.id)}
-      <Collapsible defaultOpen={true}>
-        <div class="px-2 py-1">
+      <div class="px-2 py-1">
           <!-- Category header trigger -->
           {#if deletingCategoryId === category.id}
             <div class="flex items-center gap-1.5 px-2 py-1.5 text-sm">
@@ -100,8 +116,14 @@
               >No</button>
             </div>
           {:else}
-          <Collapsible.Trigger class="btn hover:preset-tonal justify-start px-2 w-full text-left gap-1.5 group">
-            <ChevronRightIcon class="size-3.5 shrink-0 text-surface-400 transition-transform duration-200 group-data-[state=open]:rotate-90" />
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div
+            class="btn hover:preset-tonal justify-start px-2 w-full text-left gap-1.5 group cursor-pointer"
+            role="button"
+            tabindex="0"
+            onclick={() => toggleCategory(category.id)}
+          >
+            <ChevronRightIcon class="size-3.5 shrink-0 text-surface-400 transition-transform duration-200 {openCategories.has(category.id) ? 'rotate-90' : ''}" />
             <FolderIcon class="size-3.5 shrink-0 text-surface-400" />
             <div class="flex-1 min-w-0">
               <span class="text-sm font-medium truncate block">{category.name}</span>
@@ -137,11 +159,11 @@
                 <DownloadIcon class="size-3.5 text-surface-400" />
               </button>
             {/if}
-          </Collapsible.Trigger>
+          </div>
           {/if}
 
           <!-- Profiles under this category -->
-          <Collapsible.Content>
+          {#if openCategories.has(category.id)}
             <div class="ml-3 mt-0.5 space-y-0.5">
               {#each catProfiles as profile (profile.id)}
                 {@const badge = primaryBadge(profile.id, category.id)}
@@ -167,9 +189,8 @@
                 <p class="text-[11px] text-surface-400 px-4 py-2">No profiles</p>
               {/if}
             </div>
-          </Collapsible.Content>
+          {/if}
         </div>
-      </Collapsible>
     {/each}
 
     {#if addingCategory}
@@ -187,6 +208,7 @@
               if (e.key === 'Enter') confirmAddCategory()
               if (e.key === 'Escape') cancelAddCategory()
             }}
+            onblur={() => confirmAddCategory()}
           />
         </div>
       </div>

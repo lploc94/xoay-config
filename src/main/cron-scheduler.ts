@@ -96,6 +96,7 @@ export function startCronHooks(profileId: string): void {
     }
 
     const key = intervalKey(profileId, hook.id)
+    runHook() // Run immediately on start, don't wait for first interval
     const handle = setInterval(runHook, interval)
     activeIntervals.set(key, handle)
 
