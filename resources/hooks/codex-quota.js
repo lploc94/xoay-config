@@ -1,10 +1,11 @@
 // Codex CLI quota check hook — API-first with session log fallback
 // Primary: calls ChatGPT backend API for authoritative quota data
 // Fallback: parses Codex session logs when API unavailable (normal mode only)
-// Fresh switch: skips session log entirely; outputs nothing if API fails
+// Fresh switch: outputs "Fetching..." status if API fails
 //
-// Output format:
-//   { display: { quota: {...}, quotaDetail: {...}, source: {...} }, actions: { switchToNextProfile: bool } }
+// Output format (HookOutput with DisplayItem[]):
+//   display: [percentage(quota), key-value(usage), status(source), text?(reset time)]
+//   actions: { switchToNextProfile, notify? }
 
 const fs = require('fs');
 const path = require('path');
@@ -23,6 +24,11 @@ function getStatus(usedPercent) {
   if (usedPercent >= THRESHOLD_ERROR) return 'error';
   if (usedPercent >= THRESHOLD_WARNING) return 'warning';
   return 'ok';
+}
+
+function clampPercent(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
 }
 
 // ─── HTTPS helpers (Node.js built-in only) ───
@@ -178,32 +184,58 @@ function parseSessionFile(filePath) {
   return lastRateLimits;
 }
 
+// ─── Output helpers ───
+
+function formatDuration(resetsAtSec) {
+  const ts = Number(resetsAtSec);
+  if (!Number.isFinite(ts)) return null;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const diff = ts - nowSec;
+  if (diff < 0) return null;
+  if (diff < 60) return '< 1m';
+  const hours = Math.floor(diff / 3600);
+  const minutes = Math.floor((diff % 3600) / 60);
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+}
+
 // ─── Output builders ───
 
-function buildOutput(primaryUsed, secondaryUsed, source) {
-  const maxUsed = Math.max(primaryUsed, secondaryUsed);
+function buildOutput(primaryUsed, secondaryUsed, source, resetsAt) {
+  const pUsed = clampPercent(primaryUsed);
+  const sUsed = clampPercent(secondaryUsed);
+  const maxUsed = Math.max(pUsed, sUsed);
   const remaining = Math.round(100 - maxUsed);
   const status = getStatus(maxUsed);
 
+  const display = [
+    { type: 'percentage', label: 'Codex Remaining', value: remaining, max: 100, status, span: 'full' },
+    { type: 'key-value', label: 'Usage Breakdown', value: null, entries: { '5h window': `${pUsed}%`, 'Weekly': `${sUsed}%` }, status },
+    { type: 'status', label: 'Data Source', value: source, status: 'ok' },
+  ];
+
+  if (resetsAt != null) {
+    const duration = formatDuration(resetsAt);
+    if (duration) {
+      display.push({ type: 'text', label: 'Resets In', value: duration, status: 'ok' });
+    }
+  }
+
   return {
-    display: {
-      quota: { value: `${remaining}%`, label: 'Codex Remaining', status },
-      quotaDetail: { value: `5h: ${primaryUsed}% | wk: ${secondaryUsed}%`, label: 'Usage', status },
-      source: { value: source, label: 'Data Source', status: 'ok' },
-    },
+    display,
     actions: {
       switchToNextProfile: maxUsed >= THRESHOLD_AUTO_SWITCH,
+      notify: maxUsed >= THRESHOLD_ERROR ? `Quota critically low (${remaining}% remaining)` : undefined,
     },
   };
 }
 
 function buildNoDataOutput(detail) {
   return {
-    display: {
-      quota: { value: 'N/A', label: 'Codex Remaining', status: 'ok' },
-      quotaDetail: { value: detail, label: 'Usage', status: 'ok' },
-      source: { value: 'None', label: 'Data Source', status: 'ok' },
-    },
+    display: [
+      { type: 'status', label: 'Codex Quota', value: detail, status: 'ok' }
+    ]
   };
 }
 
@@ -238,8 +270,9 @@ async function main() {
       const rl = apiData.rate_limit;
       const primaryUsed = rl.primary_window ? rl.primary_window.used_percent : 0;
       const secondaryUsed = rl.secondary_window ? rl.secondary_window.used_percent : 0;
+      const resetsAt = rl.primary_window ? rl.primary_window.resets_at : undefined;
       debugLog('source=api reason=api_success');
-      console.log(JSON.stringify(buildOutput(primaryUsed, secondaryUsed, 'API')));
+      console.log(JSON.stringify(buildOutput(primaryUsed, secondaryUsed, 'API', resetsAt)));
       return;
     }
     debugLog('source=api reason=api_no_rate_limit');
@@ -247,9 +280,14 @@ async function main() {
     debugLog('source=api reason=api_error');
   }
 
-  // Step 2: API failed — if freshSwitch, output nothing (preserve persisted data)
+  // Step 2: API failed — if freshSwitch, output "Fetching" status
   if (freshSwitch) {
     debugLog('source=none reason=fresh_switch_api_failed');
+    console.log(JSON.stringify({
+      display: [
+        { type: 'status', label: 'Codex Quota', value: 'Fetching quota...', status: 'ok' }
+      ]
+    }));
     return;
   }
 
@@ -266,7 +304,8 @@ async function main() {
       console.log(JSON.stringify(buildOutput(
         sessionRateLimits.primary.used_percent,
         sessionRateLimits.secondary.used_percent,
-        source
+        source,
+        primaryResetsAt
       )));
       return;
     }
