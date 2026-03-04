@@ -205,13 +205,14 @@ function formatDuration(resetsAtSec) {
 function buildOutput(primaryUsed, secondaryUsed, source, resetsAt) {
   const pUsed = clampPercent(primaryUsed);
   const sUsed = clampPercent(secondaryUsed);
-  const maxUsed = Math.max(pUsed, sUsed);
-  const remaining = Math.round(100 - maxUsed);
-  const status = getStatus(maxUsed);
+  const primaryRemaining = Math.round(100 - pUsed);
+  const weeklyRemaining = Math.round(100 - sUsed);
+  const status = getStatus(pUsed);
 
   const display = [
-    { type: 'percentage', label: 'Codex Remaining', value: remaining, max: 100, status, span: 'full' },
-    { type: 'key-value', label: 'Usage Breakdown', value: null, entries: { '5h window': `${pUsed}%`, 'Weekly': `${sUsed}%` }, status },
+    { type: 'percentage', label: '5h Remaining', value: primaryRemaining, max: 100, status, span: 'full' },
+    { type: 'text', label: 'Weekly Remaining', value: `${weeklyRemaining}%`, status: 'ok' },
+    { type: 'key-value', label: 'Usage Breakdown', value: null, entries: { '5h window': `${pUsed}%`, 'Weekly': `${sUsed}%` }, status: 'ok' },
     { type: 'status', label: 'Data Source', value: source, status: 'ok' },
   ];
 
@@ -221,8 +222,8 @@ function buildOutput(primaryUsed, secondaryUsed, source, resetsAt) {
   return {
     display,
     actions: {
-      switchToNextProfile: maxUsed >= THRESHOLD_AUTO_SWITCH,
-      notify: maxUsed >= THRESHOLD_ERROR ? `Quota critically low (${remaining}% remaining)` : undefined,
+      switchToNextProfile: pUsed >= THRESHOLD_AUTO_SWITCH,
+      notify: pUsed >= THRESHOLD_ERROR ? `Quota critically low (${primaryRemaining}% remaining in 5h window)` : undefined,
     },
   };
 }
