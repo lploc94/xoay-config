@@ -215,12 +215,8 @@ function buildOutput(primaryUsed, secondaryUsed, source, resetsAt) {
     { type: 'status', label: 'Data Source', value: source, status: 'ok' },
   ];
 
-  if (resetsAt != null) {
-    const duration = formatDuration(resetsAt);
-    if (duration) {
-      display.push({ type: 'text', label: 'Resets In', value: duration, status: 'ok' });
-    }
-  }
+  const duration = resetsAt != null ? formatDuration(resetsAt) : null;
+  display.push({ type: 'text', label: 'Resets In', value: duration ?? '—', status: 'ok' });
 
   return {
     display,
@@ -234,7 +230,8 @@ function buildOutput(primaryUsed, secondaryUsed, source, resetsAt) {
 function buildNoDataOutput(detail) {
   return {
     display: [
-      { type: 'status', label: 'Codex Quota', value: detail, status: 'ok' }
+      { type: 'status', label: 'Codex Quota', value: detail, status: 'ok' },
+      { type: 'text', label: 'Resets In', value: '—', status: 'ok' }
     ]
   };
 }
@@ -270,7 +267,7 @@ async function main() {
       const rl = apiData.rate_limit;
       const primaryUsed = rl.primary_window ? rl.primary_window.used_percent : 0;
       const secondaryUsed = rl.secondary_window ? rl.secondary_window.used_percent : 0;
-      const resetsAt = rl.primary_window ? rl.primary_window.resets_at : undefined;
+      const resetsAt = rl.primary_window ? rl.primary_window.reset_at : undefined;
       debugLog('source=api reason=api_success');
       console.log(JSON.stringify(buildOutput(primaryUsed, secondaryUsed, 'API', resetsAt)));
       return;
@@ -285,7 +282,8 @@ async function main() {
     debugLog('source=none reason=fresh_switch_api_failed');
     console.log(JSON.stringify({
       display: [
-        { type: 'status', label: 'Codex Quota', value: 'Fetching quota...', status: 'ok' }
+        { type: 'status', label: 'Codex Quota', value: 'Fetching quota...', status: 'ok' },
+        { type: 'text', label: 'Resets In', value: '—', status: 'ok' }
       ]
     }));
     return;
