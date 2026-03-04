@@ -36,16 +36,30 @@
     return presets.find((p) => p.categoryName === category.name)
   }
 
-  /** Get the primary (first) display item for a profile, only if active. */
-  function primaryBadge(profileId: string, categoryId: string): DisplayItem | undefined {
-    if (activeProfileIds[categoryId] !== profileId) return undefined
-    const items = hookDisplayData[profileId]
-    if (!items || items.length === 0) return undefined
-    // Prefer first item with a status, otherwise first item
-    return items.find((i) => i.status) ?? items[0]
+  /** Extract display items for a profile's quota card. */
+  function profileDisplayItems(profileId: string): DisplayItem[] {
+    return hookDisplayData[profileId] ?? []
+  }
+
+  /** Check if a profile has ONLY status-type items (no percentage, key-value, or text). */
+  function isStatusOnly(items: DisplayItem[]): boolean {
+    if (items.length === 0) return false
+    return items.every((i) => i.type === 'status')
   }
 
   const STATUS_COLORS: Record<string, string> = {
+    ok: 'bg-success-500',
+    warning: 'bg-warning-500',
+    error: 'bg-error-500'
+  }
+
+  const STATUS_TEXT_COLORS: Record<string, string> = {
+    ok: 'text-success-500',
+    warning: 'text-warning-500',
+    error: 'text-error-500'
+  }
+
+  const STATUS_BAR_COLORS: Record<string, string> = {
     ok: 'bg-success-500',
     warning: 'bg-warning-500',
     error: 'bg-error-500'
@@ -166,24 +180,71 @@
           {#if openCategories.has(category.id)}
             <div class="ml-3 mt-0.5 space-y-0.5">
               {#each catProfiles as profile (profile.id)}
-                {@const badge = primaryBadge(profile.id, category.id)}
-                <button
-                  type="button"
-                  class="btn hover:preset-tonal justify-start pl-4 pr-2 w-full text-left gap-2 {selectedProfileId === profile.id ? 'preset-tonal' : ''}"
+                {@const displayItems = profileDisplayItems(profile.id)}
+                {@const hasDisplayData = displayItems.length > 0}
+                {@const statusOnly = isStatusOnly(displayItems)}
+                {@const percentageItem = displayItems.find((i) => i.type === 'percentage')}
+                {@const kvItem = displayItems.find((i) => i.type === 'key-value')}
+                {@const resetsItem = displayItems.find((i) => i.type === 'text' && i.label === 'Resets In')}
+                {@const statusItem = displayItems.find((i) => i.type === 'status')}
+                {@const isActive = activeProfileIds[category.id] === profile.id}
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <div
+                  class="rounded-md cursor-pointer transition-colors {selectedProfileId === profile.id ? 'preset-tonal' : 'hover:preset-tonal'}"
+                  role="button"
+                  tabindex="0"
                   onclick={() => onSelect(profile.id)}
                 >
-                  <UserIcon class="size-3.5 shrink-0 text-surface-400" />
-                  <span class="flex-1 truncate text-sm">{profile.name}</span>
-                  {#if badge?.value}
-                    <span
-                      class="text-[10px] font-medium px-1.5 py-0.5 rounded-full text-white shrink-0 {STATUS_COLORS[badge.status ?? 'ok']}"
-                      title={badge.label ?? ''}
-                    >{badge.value}</span>
+                  <!-- Profile name row -->
+                  <div class="flex items-center pl-4 pr-2 py-1.5 gap-2">
+                    <UserIcon class="size-3.5 shrink-0 text-surface-400" />
+                    <span class="flex-1 truncate text-sm">{profile.name}</span>
+                    {#if isActive}
+                      <span class="size-2 rounded-full bg-success-500 shrink-0" title="Active"></span>
+                    {/if}
+                  </div>
+
+                  {#if hasDisplayData && !statusOnly}
+                    <!-- Expanded quota card -->
+                    <div class="pl-8 pr-3 pb-2 space-y-1">
+                      {#if percentageItem}
+                        <!-- Percentage bar -->
+                        {@const pct = typeof percentageItem.value === 'number' ? percentageItem.value : 0}
+                        {@const max = percentageItem.max ?? 100}
+                        {@const barPct = Math.min(100, Math.max(0, (pct / max) * 100))}
+                        {@const barColor = STATUS_BAR_COLORS[percentageItem.status ?? 'ok']}
+                        <div class="w-full h-1.5 rounded-full bg-surface-200-800 overflow-hidden" title="{percentageItem.label}: {pct}%">
+                          <div class="h-full rounded-full transition-all duration-300 {barColor}" style="width: {barPct}%"></div>
+                        </div>
+                      {/if}
+
+                      {#if kvItem?.entries}
+                        <!-- Usage line -->
+                        <p class="text-[10px] text-surface-400 truncate">
+                          {#each Object.entries(kvItem.entries) as [key, val], i}
+                            {#if i > 0}<span class="mx-0.5">·</span>{/if}
+                            <span>{key}: {val}</span>
+                          {/each}
+                        </p>
+                      {/if}
+
+                      {#if resetsItem}
+                        <!-- Resets In -->
+                        <p class="text-[10px] text-surface-400 truncate">
+                          Resets in {resetsItem.value ?? '—'}
+                        </p>
+                      {/if}
+                    </div>
+                  {:else if hasDisplayData && statusOnly && statusItem}
+                    <!-- Status-only compact line -->
+                    <div class="pl-8 pr-3 pb-2">
+                      <div class="flex items-center gap-1.5">
+                        <span class="size-1.5 rounded-full shrink-0 {STATUS_COLORS[statusItem.status ?? 'ok']}"></span>
+                        <span class="text-[10px] truncate {STATUS_TEXT_COLORS[statusItem.status ?? 'ok']}">{statusItem.value}</span>
+                      </div>
+                    </div>
                   {/if}
-                  {#if activeProfileIds[category.id] === profile.id}
-                    <span class="size-2 rounded-full bg-success-500 shrink-0" title="Active"></span>
-                  {/if}
-                </button>
+                </div>
               {/each}
               {#if catProfiles.length === 0}
                 <p class="text-[11px] text-surface-400 px-4 py-2">No profiles</p>
