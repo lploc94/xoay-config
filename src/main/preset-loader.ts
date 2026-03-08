@@ -2,7 +2,14 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
 import { randomUUID, createHash } from 'crypto'
-import type { Preset, PresetFile, PresetHookDef, ConfigItem, Category, ProfileHook } from '../shared/types'
+import type {
+  Preset,
+  PresetFile,
+  PresetHookDef,
+  ConfigItem,
+  Category,
+  ProfileHook
+} from '../shared/types'
 import { PATHS } from './paths'
 
 // ── Built-in hook definitions ────────────────────────────────────
@@ -34,11 +41,34 @@ function getResourcePresetsPath(): string {
 
 // ── Preset file loading ─────────────────────────────────────────
 
+/**
+ * Validate preset ID to prevent path traversal attacks.
+ * Preset IDs must be simple slugs (alphanumeric, dash, underscore only)
+ * and must not escape the hooks directory when used in path.join().
+ */
+function validatePresetId(id: string): void {
+  // Only allow safe characters
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+    throw new Error(`Invalid preset ID format: ${id}`)
+  }
+
+  // Verify canonical containment
+  const resolved = path.resolve(PATHS.hooks, id)
+  const base = path.normalize(PATHS.hooks)
+  if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+    throw new Error(`Preset ID escapes hooks directory: ${id}`)
+  }
+}
+
 function readPresetFile(filePath: string): PresetFile | null {
   try {
     const raw = fs.readFileSync(filePath, 'utf-8')
     const data = JSON.parse(raw) as PresetFile
     if (!data.$schema || !data.id || !data.name) return null
+
+    // Validate preset ID before returning
+    validatePresetId(data.id)
+
     return data
   } catch {
     return null
@@ -78,10 +108,21 @@ function presetFileToPreset(pf: PresetFile): Preset {
     const base = { id: '', label: item.label, enabled: item.enabled }
     switch (item.type) {
       case 'file-replace':
-        defaultItems.push({ ...base, type: 'file-replace' as const, targetPath: item.targetPath ?? '', content: '' })
+        defaultItems.push({
+          ...base,
+          type: 'file-replace' as const,
+          targetPath: item.targetPath ?? '',
+          content: ''
+        })
         break
       case 'env-var':
-        defaultItems.push({ ...base, type: 'env-var' as const, name: item.name ?? '', value: item.value ?? '', shellFile: item.shellFile ?? '~/.zshrc' })
+        defaultItems.push({
+          ...base,
+          type: 'env-var' as const,
+          name: item.name ?? '',
+          value: item.value ?? '',
+          shellFile: item.shellFile ?? '~/.zshrc'
+        })
         break
       case 'run-command':
         defaultItems.push({
@@ -111,7 +152,10 @@ function presetFileToPreset(pf: PresetFile): Preset {
  * Deterministic script filename for a legacy run-command preset item.
  * Uses a hash of preset ID + command + workingDir so the name is stable across calls.
  */
-function runCommandScriptName(presetId: string, item: { command?: string; workingDir?: string }): string {
+function runCommandScriptName(
+  presetId: string,
+  item: { command?: string; workingDir?: string }
+): string {
   const hash = createHash('sha256')
     .update(`${presetId}:${item.command ?? ''}:${item.workingDir ?? ''}`)
     .digest('hex')
@@ -123,7 +167,10 @@ function runCommandScriptName(presetId: string, item: { command?: string; workin
  * Write the hook script for a legacy run-command preset item, if it doesn't already exist.
  * Called from importPresetFile() — the only mutation path.
  */
-function ensureRunCommandScript(presetId: string, item: { label?: string; command?: string; workingDir?: string; timeout?: number }): void {
+function ensureRunCommandScript(
+  presetId: string,
+  item: { label?: string; command?: string; workingDir?: string; timeout?: number }
+): void {
   const scriptName = runCommandScriptName(presetId, item)
   const scriptPath = path.join(PATHS.hooks, scriptName)
 
@@ -164,8 +211,18 @@ function ensureRunCommandScript(presetId: string, item: { label?: string; comman
  * - `builtin/<scriptFile>` for scripts provisioned into the builtin hooks dir
  * - `<scriptFile>` for run-command converted hooks (at hooks root)
  */
-export function presetHooksToProfileHooks(presetId: string, hookDefs: PresetHookDef[]): ProfileHook[] {
+export function presetHooksToProfileHooks(
+  presetId: string,
+  hookDefs: PresetHookDef[]
+): ProfileHook[] {
   return hookDefs.map((def) => {
+    // Security: Validate scriptFile to prevent path traversal
+    if (def.scriptFile.includes('..') || path.isAbsolute(def.scriptFile)) {
+      throw new Error(
+        `Security: Invalid hook scriptFile in preset "${presetId}": ${def.scriptFile}`
+      )
+    }
+
     let scriptPath = def.scriptFile
 
     const nestedPath = path.join(presetId, def.scriptFile)
@@ -211,7 +268,7 @@ export function getPresetById(id: string): Preset | undefined {
 
 function findOrCreateCategory(categoryName: string): Category {
   // Lazy require to avoid circular dependency (storage → preset-loader → storage)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+
   const { listCategories, createCategory } = require('./storage')
   const existing: Category[] = listCategories()
   const match = existing.find((c) => c.name === categoryName)
@@ -282,18 +339,25 @@ export function exportPreset(
         case 'env-var':
           return { ...base, name: item.name, value: item.value, shellFile: item.shellFile }
         case 'run-command':
-          return { ...base, command: item.command, workingDir: item.workingDir, timeout: item.timeout }
+          return {
+            ...base,
+            command: item.command,
+            workingDir: item.workingDir,
+            timeout: item.timeout
+          }
         default:
           return base
       }
     }),
-    hooks: hooks.map((h): PresetHookDef => ({
-      label: h.label,
-      type: h.type,
-      cronIntervalMs: h.cronIntervalMs,
-      timeout: h.timeout,
-      scriptFile: path.basename(h.scriptPath)
-    })),
+    hooks: hooks.map(
+      (h): PresetHookDef => ({
+        label: h.label,
+        type: h.type,
+        cronIntervalMs: h.cronIntervalMs,
+        timeout: h.timeout,
+        scriptFile: path.basename(h.scriptPath)
+      })
+    ),
     scripts: {}
   }
 
