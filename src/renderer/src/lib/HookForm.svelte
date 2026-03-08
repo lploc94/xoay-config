@@ -23,6 +23,7 @@
   let runInBackground = $state(false)
   let builtinHooks = $state<BuiltinHookInfo[]>([])
   let showBuiltin = $state(false)
+  let fileError = $state('')
 
   $effect(() => {
     if (open) {
@@ -56,9 +57,14 @@
   }
 
   async function handleBrowse(): Promise<void> {
-    const path = await onSelectFile()
-    if (path) {
-      scriptPath = path
+    try {
+      fileError = ''
+      const path = await onSelectFile()
+      if (path) {
+        scriptPath = path
+      }
+    } catch (error) {
+      fileError = error instanceof Error ? error.message : 'Failed to select file'
     }
   }
 
@@ -88,104 +94,158 @@
 </script>
 
 {#if open}
-<Dialog open={true}>
-  <Portal>
-    <Dialog.Backdrop class="fixed inset-0 z-50 bg-surface-950/60" />
-    <Dialog.Positioner class="fixed inset-0 z-50 flex justify-center items-center p-4">
-      <Dialog.Content class="card bg-surface-100-900 w-full max-w-lg p-5 space-y-4 shadow-xl {animation}">
-        <header class="flex justify-between items-center">
-          <div class="flex items-center gap-2">
-            <Dialog.Title class="text-lg font-bold">{title}</Dialog.Title>
-            {#if isBuiltIn}
-              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-300/50 text-surface-500 dark:bg-surface-700/50 dark:text-surface-400" title="This is a built-in hook that ships with the app">Built-in</span>
-            {/if}
-          </div>
-          <button type="button" class="btn-icon hover:preset-tonal" onclick={onCancel}>
-            <XIcon class="size-4" />
-          </button>
-        </header>
-
-        <form class="space-y-3" onsubmit={(e) => { e.preventDefault(); handleSave() }}>
-          <!-- Label -->
-          <div>
-            <label for="hook-label" class="label text-sm font-medium mb-1">Label</label>
-            <input id="hook-label" class="input" type="text" bind:value={label} placeholder="Hook name" required />
-          </div>
-
-          <!-- Type -->
-          <div>
-            <label for="hook-type" class="label text-sm font-medium mb-1">Type</label>
-            <select id="hook-type" class="select" bind:value={hookType}>
-              <option value="pre-switch-in">Pre Switch In</option>
-              <option value="post-switch-in">Post Switch In</option>
-              <option value="pre-switch-out">Pre Switch Out</option>
-              <option value="post-switch-out">Post Switch Out</option>
-              <option value="cron">Cron</option>
-            </select>
-          </div>
-
-          <!-- Script Path -->
-          <div>
-            <label for="hook-script" class="label text-sm font-medium mb-1">Script Path</label>
-            <div class="flex gap-2">
-              <input id="hook-script" class="input flex-1" type="text" bind:value={scriptPath} placeholder="builtin/codex-quota.js" required />
-              <button type="button" class="btn btn-sm preset-tonal" onclick={handleBrowse}>Browse</button>
-              {#if builtinHooks.length > 0}
-                <button type="button" class="btn btn-sm preset-tonal" onclick={() => showBuiltin = !showBuiltin}>Built-in</button>
+  <Dialog open={true}>
+    <Portal>
+      <Dialog.Backdrop class="fixed inset-0 z-50 bg-surface-950/60" />
+      <Dialog.Positioner class="fixed inset-0 z-50 flex justify-center items-center p-4">
+        <Dialog.Content
+          class="card bg-surface-100-900 w-full max-w-lg p-5 space-y-4 shadow-xl {animation}"
+        >
+          <header class="flex justify-between items-center">
+            <div class="flex items-center gap-2">
+              <Dialog.Title class="text-lg font-bold">{title}</Dialog.Title>
+              {#if isBuiltIn}
+                <span
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-300/50 text-surface-500 dark:bg-surface-700/50 dark:text-surface-400"
+                  title="This is a built-in hook that ships with the app">Built-in</span
+                >
               {/if}
             </div>
-            {#if showBuiltin && builtinHooks.length > 0}
-              <div class="mt-2 border border-surface-300-700 rounded-md overflow-hidden">
-                {#each builtinHooks as bh}
-                  <button
-                    type="button"
-                    class="w-full text-left px-3 py-2 hover:bg-surface-200-800 flex flex-col"
-                    onclick={() => selectBuiltin(bh)}
-                  >
-                    <span class="text-sm font-medium">{bh.name}</span>
-                    {#if bh.description}
-                      <span class="text-xs text-surface-400">{bh.description}</span>
-                    {/if}
-                  </button>
-                {/each}
-              </div>
-            {/if}
-          </div>
+            <button type="button" class="btn-icon hover:preset-tonal" onclick={onCancel}>
+              <XIcon class="size-4" />
+            </button>
+          </header>
 
-          <!-- Cron Interval (only for cron type) -->
-          {#if hookType === 'cron'}
+          <form
+            class="space-y-3"
+            onsubmit={(e) => {
+              e.preventDefault()
+              handleSave()
+            }}
+          >
+            <!-- Label -->
             <div>
-              <label for="hook-interval" class="label text-sm font-medium mb-1">Interval (seconds)</label>
-              <input id="hook-interval" class="input" type="number" bind:value={cronIntervalSec} min="10" required />
-              <p class="text-xs text-surface-400 mt-1">Minimum 10 seconds</p>
+              <label for="hook-label" class="label text-sm font-medium mb-1">Label</label>
+              <input
+                id="hook-label"
+                class="input"
+                type="text"
+                bind:value={label}
+                placeholder="Hook name"
+                required
+              />
             </div>
 
+            <!-- Type -->
+            <div>
+              <label for="hook-type" class="label text-sm font-medium mb-1">Type</label>
+              <select id="hook-type" class="select" bind:value={hookType}>
+                <option value="pre-switch-in">Pre Switch In</option>
+                <option value="post-switch-in">Post Switch In</option>
+                <option value="pre-switch-out">Pre Switch Out</option>
+                <option value="post-switch-out">Post Switch Out</option>
+                <option value="cron">Cron</option>
+              </select>
+            </div>
+
+            <!-- Script Path -->
+            <div>
+              <label for="hook-script" class="label text-sm font-medium mb-1">Script Path</label>
+              <div class="flex gap-2">
+                <input
+                  id="hook-script"
+                  class="input flex-1"
+                  type="text"
+                  bind:value={scriptPath}
+                  placeholder="builtin/codex-quota.js"
+                  required
+                />
+                <button type="button" class="btn btn-sm preset-tonal" onclick={handleBrowse}
+                  >Browse</button
+                >
+                {#if builtinHooks.length > 0}
+                  <button
+                    type="button"
+                    class="btn btn-sm preset-tonal"
+                    onclick={() => (showBuiltin = !showBuiltin)}>Built-in</button
+                  >
+                {/if}
+              </div>
+              {#if fileError}
+                <p class="text-xs text-error-500 mt-1">{fileError}</p>
+              {/if}
+              {#if showBuiltin && builtinHooks.length > 0}
+                <div class="mt-2 border border-surface-300-700 rounded-md overflow-hidden">
+                  {#each builtinHooks as bh}
+                    <button
+                      type="button"
+                      class="w-full text-left px-3 py-2 hover:bg-surface-200-800 flex flex-col"
+                      onclick={() => selectBuiltin(bh)}
+                    >
+                      <span class="text-sm font-medium">{bh.name}</span>
+                      {#if bh.description}
+                        <span class="text-xs text-surface-400">{bh.description}</span>
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+
+            <!-- Cron Interval (only for cron type) -->
+            {#if hookType === 'cron'}
+              <div>
+                <label for="hook-interval" class="label text-sm font-medium mb-1"
+                  >Interval (seconds)</label
+                >
+                <input
+                  id="hook-interval"
+                  class="input"
+                  type="number"
+                  bind:value={cronIntervalSec}
+                  min="10"
+                  required
+                />
+                <p class="text-xs text-surface-400 mt-1">Minimum 10 seconds</p>
+              </div>
+
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" class="checkbox" bind:checked={runInBackground} />
+                <span class="text-sm">Run in background</span>
+              </label>
+              <p class="text-xs text-surface-400 -mt-2 ml-7">
+                Runs for all profiles regardless of active status
+              </p>
+            {/if}
+
+            <!-- Timeout -->
+            <div>
+              <label for="hook-timeout" class="label text-sm font-medium mb-1"
+                >Timeout (seconds, optional)</label
+              >
+              <input
+                id="hook-timeout"
+                class="input"
+                type="number"
+                bind:value={timeoutSec}
+                min="1"
+                max="300"
+              />
+            </div>
+
+            <!-- Enabled -->
             <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" class="checkbox" bind:checked={runInBackground} />
-              <span class="text-sm">Run in background</span>
+              <input type="checkbox" class="checkbox" bind:checked={enabled} />
+              <span class="text-sm">Enabled</span>
             </label>
-            <p class="text-xs text-surface-400 -mt-2 ml-7">Runs for all profiles regardless of active status</p>
-          {/if}
 
-          <!-- Timeout -->
-          <div>
-            <label for="hook-timeout" class="label text-sm font-medium mb-1">Timeout (seconds, optional)</label>
-            <input id="hook-timeout" class="input" type="number" bind:value={timeoutSec} min="1" max="300" />
-          </div>
-
-          <!-- Enabled -->
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" class="checkbox" bind:checked={enabled} />
-            <span class="text-sm">Enabled</span>
-          </label>
-
-          <footer class="flex justify-end gap-2 pt-2">
-            <button type="button" class="btn preset-tonal" onclick={onCancel}>Cancel</button>
-            <button type="submit" class="btn preset-filled">{isEditing ? 'Save' : 'Add'}</button>
-          </footer>
-        </form>
-      </Dialog.Content>
-    </Dialog.Positioner>
-  </Portal>
-</Dialog>
+            <footer class="flex justify-end gap-2 pt-2">
+              <button type="button" class="btn preset-tonal" onclick={onCancel}>Cancel</button>
+              <button type="submit" class="btn preset-filled">{isEditing ? 'Save' : 'Add'}</button>
+            </footer>
+          </form>
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Portal>
+  </Dialog>
 {/if}
