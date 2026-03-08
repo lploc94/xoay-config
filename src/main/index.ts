@@ -1,5 +1,7 @@
 import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
+import * as path from 'path'
+import { fileURLToPath } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerSwitchHandlers } from './switch-handlers'
@@ -29,7 +31,8 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: true,
+      contextIsolation: true
     }
   })
 
@@ -38,8 +41,80 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    // Security: Only allow safe URL schemes
+    const url = details.url
+    const allowedSchemes = ['https:', 'http:', 'mailto:']
+    try {
+      const parsed = new URL(url)
+      if (allowedSchemes.includes(parsed.protocol)) {
+        shell.openExternal(url)
+      } else {
+        console.warn(`[Security] Blocked URL with unsafe scheme: ${parsed.protocol}`)
+      }
+    } catch {
+      console.warn(`[Security] Blocked invalid URL: ${url}`)
+    }
     return { action: 'deny' }
+  })
+
+  // Security: Prevent renderer from navigating main window to remote content
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const parsed = new URL(url)
+
+      // Allow file:// protocol only for app-owned renderer files
+      if (parsed.protocol === 'file:') {
+        // Block UNC paths (file://host/path)
+        if (parsed.host) {
+          event.preventDefault()
+          console.warn(`[Security] Blocked UNC file path: ${url}`)
+          return
+        }
+
+        // Convert file URL to path and check if it's within renderer directory
+        try {
+          const filePath = fileURLToPath(url)
+          const rendererDir = path.normalize(path.join(__dirname, '../renderer'))
+          const normalizedPath = path.normalize(filePath)
+
+          // Only allow files within the renderer directory
+          if (
+            normalizedPath.startsWith(rendererDir + path.sep) ||
+            normalizedPath === rendererDir
+          ) {
+            return // Allow navigation to app's own renderer files
+          }
+
+          event.preventDefault()
+          console.warn(`[Security] Blocked file navigation outside renderer dir: ${url}`)
+        } catch {
+          event.preventDefault()
+          console.warn(`[Security] Blocked invalid file URL: ${url}`)
+        }
+        return
+      }
+
+      // In development, allow the dev server origin
+      if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+        const devOrigin = new URL(process.env['ELECTRON_RENDERER_URL']).origin
+        if (parsed.origin === devOrigin) {
+          return // Allow navigation within dev server
+        }
+      }
+
+      // Block all other protocols - open externally if safe
+      event.preventDefault()
+
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        shell.openExternal(url)
+        console.log(`[Security] Opened external URL in browser: ${url}`)
+      } else {
+        console.warn(`[Security] Blocked navigation to unsafe URL: ${url}`)
+      }
+    } catch {
+      event.preventDefault()
+      console.warn(`[Security] Blocked navigation to invalid URL: ${url}`)
+    }
   })
 
   // HMR for renderer base on electron-vite cli.

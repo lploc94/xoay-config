@@ -44,10 +44,7 @@ function fileHash(filePath: string): string {
  */
 export function provisionBuiltinHooks(): void {
   const resourceBase = getResourceHooksPath()
-  const sources = [
-    path.join(resourceBase, 'hooks'),
-    path.join(resourceBase, 'sample-hooks')
-  ]
+  const sources = [path.join(resourceBase, 'hooks'), path.join(resourceBase, 'sample-hooks')]
 
   for (const srcDir of sources) {
     if (!fs.existsSync(srcDir)) continue
@@ -83,15 +80,55 @@ export function listBuiltinHooks(): BuiltinHookInfo[] {
 }
 
 /**
+ * Validate that a script path is safe (no path traversal).
+ * Throws if the path contains dangerous patterns.
+ * Uses canonical path comparison to prevent symlink bypass.
+ */
+function validateScriptPath(scriptPath: string): void {
+  // Reject absolute paths
+  if (path.isAbsolute(scriptPath)) {
+    throw new Error(`Security: Absolute paths not allowed in hook scripts: ${scriptPath}`)
+  }
+
+  // Reject paths with parent directory references
+  if (scriptPath.includes('..')) {
+    throw new Error(`Security: Path traversal detected in hook script: ${scriptPath}`)
+  }
+
+  // Get canonical path of hooks directory
+  const hooksCanonical = fs.realpathSync(PATHS.hooks)
+
+  // Resolve the script path against hooks directory
+  const resolved = path.join(PATHS.hooks, scriptPath)
+
+  // Get canonical path if file exists, otherwise normalize the path
+  let resolvedCanonical: string
+  try {
+    resolvedCanonical = fs.realpathSync(resolved)
+  } catch {
+    // File doesn't exist yet - use normalized path for containment check
+    resolvedCanonical = path.normalize(resolved)
+  }
+
+  // Ensure the canonical path is within hooks directory
+  if (
+    !resolvedCanonical.startsWith(hooksCanonical + path.sep) &&
+    resolvedCanonical !== hooksCanonical
+  ) {
+    throw new Error(`Security: Hook script path escapes hooks directory: ${scriptPath}`)
+  }
+}
+
+/**
  * Resolve a hook scriptPath to an absolute path.
  * - "builtin/xxx.js" → <userData>/hooks/builtin/xxx.js
  * - relative path (no leading /) → <userData>/hooks/<path>
- * - absolute path → as-is
+ * - absolute paths are rejected for security
  */
 export function resolveHookPath(scriptPath: string): string {
-  if (path.isAbsolute(scriptPath)) {
-    return scriptPath
-  }
+  // Security: Validate path before resolving
+  validateScriptPath(scriptPath)
+
   // Relative paths resolve against the hooks directory
   return path.join(PATHS.hooks, scriptPath)
 }
@@ -99,12 +136,30 @@ export function resolveHookPath(scriptPath: string): string {
 /**
  * Convert an absolute path to a relative path if it's inside the hooks directory.
  * Returns the original path if it's outside the hooks directory.
+ * Uses canonical path comparison to prevent symlink bypass.
  */
 export function toRelativeHookPath(absolutePath: string): string {
-  const normalized = path.normalize(absolutePath)
-  const hooksPrefix = path.normalize(PATHS.hooks) + path.sep
-  if (normalized.startsWith(hooksPrefix)) {
-    return path.relative(PATHS.hooks, normalized)
+  try {
+    // Get canonical paths for comparison
+    const hooksCanonical = fs.realpathSync(PATHS.hooks)
+    const pathCanonical = fs.realpathSync(absolutePath)
+
+    // Check if the canonical path is within hooks directory
+    if (
+      pathCanonical.startsWith(hooksCanonical + path.sep) ||
+      pathCanonical === hooksCanonical
+    ) {
+      return path.relative(PATHS.hooks, pathCanonical)
+    }
+  } catch {
+    // If realpathSync fails (file doesn't exist), fall back to normalized comparison
+    const normalized = path.normalize(absolutePath)
+    const hooksPrefix = path.normalize(PATHS.hooks) + path.sep
+    if (normalized.startsWith(hooksPrefix)) {
+      return path.relative(PATHS.hooks, normalized)
+    }
   }
+
+  // Path is outside hooks directory - return original absolute path
   return absolutePath
 }

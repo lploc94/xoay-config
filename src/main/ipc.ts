@@ -1,6 +1,17 @@
 import { ipcMain, dialog } from 'electron'
+import * as path from 'path'
 import { IPC_CHANNELS } from '../shared/types'
-import type { IpcResponse, Profile, Category, CreateProfileReq, ConfigItem, Preset, ProfileHook, DisplayItem, BuiltinHookInfo } from '../shared/types'
+import type {
+  IpcResponse,
+  Profile,
+  Category,
+  CreateProfileReq,
+  ConfigItem,
+  Preset,
+  ProfileHook,
+  DisplayItem,
+  BuiltinHookInfo
+} from '../shared/types'
 import {
   listProfiles,
   getProfile,
@@ -41,7 +52,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.CATEGORY_CREATE,
-    (_, { name, icon, builtIn }: { name: string; icon?: string; builtIn?: boolean }): IpcResponse<Category> => {
+    (
+      _,
+      { name, icon, builtIn }: { name: string; icon?: string; builtIn?: boolean }
+    ): IpcResponse<Category> => {
       try {
         return ok(createCategory(name, { icon, builtIn }))
       } catch (e) {
@@ -50,28 +64,22 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.CATEGORY_UPDATE,
-    (_, category: Category): IpcResponse<Category> => {
-      try {
-        return ok(updateCategory(category))
-      } catch (e) {
-        return fail(String(e))
-      }
+  ipcMain.handle(IPC_CHANNELS.CATEGORY_UPDATE, (_, category: Category): IpcResponse<Category> => {
+    try {
+      return ok(updateCategory(category))
+    } catch (e) {
+      return fail(String(e))
     }
-  )
+  })
 
-  ipcMain.handle(
-    IPC_CHANNELS.CATEGORY_DELETE,
-    (_, { id }: { id: string }): IpcResponse<void> => {
-      try {
-        deleteCategory(id)
-        return ok(undefined as void)
-      } catch (e) {
-        return fail(String(e))
-      }
+  ipcMain.handle(IPC_CHANNELS.CATEGORY_DELETE, (_, { id }: { id: string }): IpcResponse<void> => {
+    try {
+      deleteCategory(id)
+      return ok(undefined as void)
+    } catch (e) {
+      return fail(String(e))
     }
-  )
+  })
 
   // ── Profile CRUD ─────────────────────────────────────────────
 
@@ -97,16 +105,13 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.PROFILE_CREATE,
-    (_, req: CreateProfileReq): IpcResponse<Profile> => {
-      try {
-        return ok(createProfile(req))
-      } catch (e) {
-        return fail(String(e))
-      }
+  ipcMain.handle(IPC_CHANNELS.PROFILE_CREATE, (_, req: CreateProfileReq): IpcResponse<Profile> => {
+    try {
+      return ok(createProfile(req))
+    } catch (e) {
+      return fail(String(e))
     }
-  )
+  })
 
   ipcMain.handle(IPC_CHANNELS.PROFILE_UPDATE, (_, profile: Profile): IpcResponse<Profile> => {
     try {
@@ -187,9 +192,7 @@ export function registerIpcHandlers(): void {
 
         // Collect hooks from profiles that use this preset
         const allProfiles = listProfiles()
-        const hooks = allProfiles
-          .filter((p) => p.presetId === presetId)
-          .flatMap((p) => p.hooks)
+        const hooks = allProfiles.filter((p) => p.presetId === presetId).flatMap((p) => p.hooks)
 
         const result = await dialog.showSaveDialog({
           title: 'Export Preset',
@@ -237,16 +240,13 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.IMPORT_AUTO_DETECT,
-    async (): Promise<IpcResponse<string[]>> => {
-      try {
-        return ok(await autoDetectPresets())
-      } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e))
-      }
+  ipcMain.handle(IPC_CHANNELS.IMPORT_AUTO_DETECT, async (): Promise<IpcResponse<string[]>> => {
+    try {
+      return ok(await autoDetectPresets())
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : String(e))
     }
-  )
+  })
 
   ipcMain.handle(
     IPC_CHANNELS.IMPORT_PREVIEW,
@@ -310,26 +310,31 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.HOOK_SELECT_FILE,
-    async (): Promise<IpcResponse<string | null>> => {
-      try {
-        const result = await dialog.showOpenDialog({
-          title: 'Select Hook Script',
-          defaultPath: getHooksDir(),
-          filters: [{ name: 'JavaScript', extensions: ['js'] }],
-          properties: ['openFile']
-        })
-        if (result.canceled || result.filePaths.length === 0) {
-          return ok(null)
-        }
-        // Store relative path if inside hooks dir, absolute otherwise
-        return ok(toRelativeHookPath(result.filePaths[0]))
-      } catch (e) {
-        return fail(String(e))
+  ipcMain.handle(IPC_CHANNELS.HOOK_SELECT_FILE, async (): Promise<IpcResponse<string | null>> => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: 'Select Hook Script',
+        defaultPath: getHooksDir(),
+        filters: [{ name: 'JavaScript', extensions: ['js'] }],
+        properties: ['openFile']
+      })
+      if (result.canceled || result.filePaths.length === 0) {
+        return ok(null)
       }
+
+      const selectedPath = result.filePaths[0]
+      const relativePath = toRelativeHookPath(selectedPath)
+
+      // Security: Only accept scripts inside hooks directory
+      if (path.isAbsolute(relativePath)) {
+        return fail('Selected script must be inside the hooks directory')
+      }
+
+      return ok(relativePath)
+    } catch (e) {
+      return fail(String(e))
     }
-  )
+  })
 
   ipcMain.handle(
     IPC_CHANNELS.HOOK_GET_DISPLAY_DATA,
@@ -342,16 +347,13 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.HOOK_LIST_BUILTIN,
-    (): IpcResponse<BuiltinHookInfo[]> => {
-      try {
-        return ok(listBuiltinHooks())
-      } catch (e) {
-        return fail(String(e))
-      }
+  ipcMain.handle(IPC_CHANNELS.HOOK_LIST_BUILTIN, (): IpcResponse<BuiltinHookInfo[]> => {
+    try {
+      return ok(listBuiltinHooks())
+    } catch (e) {
+      return fail(String(e))
     }
-  )
+  })
 
   ipcMain.handle(
     IPC_CHANNELS.HOOK_GET_DISPLAY_TIMESTAMPS,
